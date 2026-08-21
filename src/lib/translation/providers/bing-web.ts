@@ -7,6 +7,12 @@ interface BingCredentials {
   token: string;
 }
 
+const browserHeaders = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0",
+  "Accept-Language": "en-US,en;q=0.9",
+};
+
 export function parseBingCredentials(html: string): BingCredentials {
   const iid = html.match(/data-iid=["']([\w.]+)["']/)?.[1];
   const ig = html.match(/IG\s*:\s*["']([\w.]+)["']/)?.[1];
@@ -36,8 +42,13 @@ export class BingWebProvider implements TranslationProvider {
     if (this.credentials && this.credentials.expiresAt > Date.now()) {
       return this.credentials.value;
     }
-    const response = await this.fetcher("https://www.bing.com/translator", { signal });
-    if (!response.ok) throw new Error("Bing 翻译暂时不可用");
+    const response = await this.fetcher("https://www.bing.com/translator", {
+      headers: browserHeaders,
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Bing 凭据请求被上游拒绝（HTTP ${response.status}）`);
+    }
     const value = parseBingCredentials(await response.text());
     this.credentials = { value, expiresAt: Date.now() + 60 * 60 * 1000 };
     return value;
@@ -48,7 +59,7 @@ export class BingWebProvider implements TranslationProvider {
     const query = new URLSearchParams({
       isVertical: "1",
       IG: credentials.ig,
-      IID: credentials.iid,
+      IID: `${credentials.iid}.1`,
     });
     const body = new URLSearchParams({
       fromLang: bingLanguage(input.sourceLanguage),
@@ -56,19 +67,25 @@ export class BingWebProvider implements TranslationProvider {
       text: input.text,
       key: credentials.key,
       token: credentials.token,
+      tryFetchingGenderDebiasedTranslations: "true",
     });
     const response = await this.fetcher(
       `https://www.bing.com/ttranslatev3?${query}`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: {
+          ...browserHeaders,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: "https://www.bing.com",
+          Referer: "https://www.bing.com/translator",
+        },
         body: body.toString(),
         signal,
       },
     );
     if (!response.ok) {
       this.credentials = undefined;
-      throw new Error("Bing 翻译暂时不可用");
+      throw new Error(`Bing 翻译请求被上游拒绝（HTTP ${response.status}）`);
     }
     const responseText = await response.text();
     if (!responseText) {
