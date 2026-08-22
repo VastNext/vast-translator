@@ -19,6 +19,17 @@ describe("validateTranslateRequest", () => {
     });
   });
 
+  it("接受两个 Agnes Provider", () => {
+    expect(
+      validateTranslateRequest({
+        text: "Hello",
+        sourceLanguage: "auto",
+        targetLanguage: "zh-CN",
+        providers: ["agnes-2-0", "agnes-2-5"],
+      }),
+    ).toMatchObject({ providers: ["agnes-2-0", "agnes-2-5"] });
+  });
+
   it("拒绝空文本", () => {
     expect(() =>
       validateTranslateRequest({

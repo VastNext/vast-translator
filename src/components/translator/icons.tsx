@@ -23,3 +23,11 @@ export function CloseIcon(props: SVGProps<SVGSVGElement>) {
 export function ArrowIcon(props: SVGProps<SVGSVGElement>) {
   return <Icon {...props}><path d="M5 12h13m-5-5 5 5-5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></Icon>;
 }
+
+export function CollapseIcon({ expanded, ...props }: SVGProps<SVGSVGElement> & { expanded: boolean }) {
+  return <Icon {...props}><path d={expanded ? "m7 14 5-5 5 5" : "m7 10 5 5 5-5"} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></Icon>;
+}
+
+export function RetryIcon(props: SVGProps<SVGSVGElement>) {
+  return <Icon {...props}><path d="M19 8a7 7 0 1 0 1 6M19 4v4h-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></Icon>;
+}
