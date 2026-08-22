@@ -1,5 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TranslatorWorkbench } from "./translator-workbench";
@@ -43,10 +44,276 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("TranslatorWorkbench", () => {
+  it("StrictMode 下切换 Provider 不会重复创建卡片", () => {
+    render(<StrictMode><TranslatorWorkbench /></StrictMode>);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Agnes 2\.0/ }));
+    expect(screen.getAllByRole("article", { name: "Agnes 2.0 翻译卡片" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Agnes 2\.0/ }));
+    expect(screen.queryByRole("article", { name: "Agnes 2.0 翻译卡片" })).not.toBeInTheDocument();
+  });
+
+  it("乱序新增 Provider 仍按固定顺序排列", () => {
+    render(<TranslatorWorkbench />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Azure/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Agnes 2\.5/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Agnes 2\.0/ }));
+
+    expect(Array.from(screen.getByTestId("results-grid").querySelectorAll("article header strong"), (node) => node.textContent)).toEqual([
+      "Google", "Bing", "Azure", "Agnes 2.0", "Agnes 2.5",
+    ]);
+  });
+  it("初始 Provider 立即显示尚未翻译卡，新增 Provider 按固定顺序插入且不请求", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    render(<TranslatorWorkbench />);
+
+    expect(screen.getByRole("article", { name: "Google 翻译卡片" })).toHaveTextContent("尚未翻译");
+    expect(screen.getByRole("article", { name: "Bing 翻译卡片" })).toHaveTextContent("尚未翻译");
+
+    await user.click(screen.getByRole("checkbox", { name: /Agnes 2\.5/ }));
+    const cards = screen.getByTestId("results-grid").querySelectorAll("article");
+    expect(Array.from(cards, (card) => card.textContent)).toEqual([
+      expect.stringContaining("Google"),
+      expect.stringContaining("Bing"),
+      expect.stringContaining("Agnes 2.5"),
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("取消选择立即移除卡片，重新勾选创建不含旧结果的新卡", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "旧结果", durationMs: 1 }] }), { status: 200 }),
+    );
+    render(<TranslatorWorkbench />);
+    await user.type(screen.getByLabelText("原文"), "Hello");
+    await user.click(screen.getByRole("checkbox", { name: /Bing/ }));
+    await user.click(screen.getByRole("button", { name: "开始翻译" }));
+    expect(await screen.findByText("旧结果")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: /Google/ }));
+    expect(screen.queryByRole("article", { name: "Google 翻译卡片" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /Google/ }));
+
+    expect(screen.getByRole("article", { name: "Google 翻译卡片" })).toHaveTextContent("尚未翻译");
+    expect(screen.queryByText("旧结果")).not.toBeInTheDocument();
+  });
+
+  it("折叠后删除并重加 Provider 会创建默认展开的新卡", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "旧结果", durationMs: 1 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "新结果", durationMs: 1 }] }), { status: 200 }));
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "使用 Google 翻译" }));
+    await screen.findByText("旧结果");
+    fireEvent.click(screen.getByRole("button", { name: "折叠 Google 翻译结果" }));
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Google/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Google/ }));
+    fireEvent.click(screen.getByRole("button", { name: "使用 Google 翻译" }));
+
+    const collapse = await screen.findByRole("button", { name: "折叠 Google 翻译结果" });
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("新结果")).toBeInTheDocument();
+  });
+
+  it("单卡按钮按 idle、成功、失败和 pending 状态显示对应动作", async () => {
+    const pending = deferredResponse();
+    vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "error", error: "失败", code: "UPSTREAM_ERROR", durationMs: 2 }] }), { status: 200 }));
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+
+    const translate = screen.getByRole("button", { name: "使用 Google 翻译" });
+    fireEvent.click(translate);
+    expect(screen.getByRole("button", { name: "Google 正在翻译" })).toBeDisabled();
+    pending.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "你好", durationMs: 1 }] }), { status: 200 }));
+    fireEvent.click(await screen.findByRole("button", { name: "重新执行 Google 翻译" }));
+    expect(await screen.findByRole("button", { name: "重试 Google 翻译" })).toBeInTheDocument();
+  });
+
+  it("单卡操作只请求目标 Provider，并使用每次点击时的当前文本和语言", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "结果", durationMs: 1 }] }), { status: 200 }),
+    );
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "第一次" } });
+    fireEvent.click(screen.getByRole("button", { name: "使用 Google 翻译" }));
+    await screen.findByText("结果");
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "第二次" } });
+    fireEvent.change(screen.getByLabelText("源语言"), { target: { value: "zh-CN" } });
+    fireEvent.change(screen.getByLabelText("目标语言"), { target: { value: "en" } });
+    fireEvent.click(screen.getByRole("button", { name: "重新执行 Google 翻译" }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+      text: "第二次", sourceLanguage: "zh-CN", targetLanguage: "en", providers: ["google"],
+    });
+  });
+
+  it("空输入禁用单卡操作但保留已有结果", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "保留结果", durationMs: 1 }] }), { status: 200 }),
+    );
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "使用 Google 翻译" }));
+    await screen.findByText("保留结果");
+    fireEvent.click(screen.getByRole("button", { name: "清空原文" }));
+
+    expect(screen.getByText("保留结果")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重新执行 Google 翻译" })).toBeDisabled();
+  });
+
+  it("取消 pending Provider 独立 abort 并移除，迟到响应不会恢复卡片", async () => {
+    const pending = deferredResponse();
+    let signal!: AbortSignal;
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      signal = init!.signal as AbortSignal;
+      return pending.promise;
+    });
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "使用 Google 翻译" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Google/ }));
+
+    expect(signal.aborted).toBe(true);
+    expect(screen.queryByText("Google", { selector: "article strong" })).not.toBeInTheDocument();
+    pending.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "迟到结果", durationMs: 1 }] }), { status: 200 }));
+    await Promise.resolve();
+    expect(screen.queryByText("迟到结果")).not.toBeInTheDocument();
+  });
+
+  it("移除再勾选后的旧请求不能覆盖新卡请求", async () => {
+    const oldRequest = deferredResponse();
+    const newRequest = deferredResponse();
+    vi.spyOn(globalThis, "fetch").mockReturnValueOnce(oldRequest.promise).mockReturnValueOnce(newRequest.promise);
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "使用 Google 翻译" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Google/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Google/ }));
+    fireEvent.click(screen.getByRole("button", { name: "使用 Google 翻译" }));
+    oldRequest.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "旧结果", durationMs: 1 }] }), { status: 200 }));
+    await Promise.resolve();
+    expect(screen.getByRole("button", { name: "Google 正在翻译" })).toBeDisabled();
+    expect(screen.queryByText("旧结果")).not.toBeInTheDocument();
+    newRequest.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "新结果", durationMs: 1 }] }), { status: 200 }));
+    expect(await screen.findByText("新结果")).toBeInTheDocument();
+  });
+
+  it("单卡 pending 时文本、语言和 Provider 可编辑，只有该卡和批量操作禁用", () => {
+    vi.spyOn(globalThis, "fetch").mockReturnValue(deferredResponse().promise);
+    render(<TranslatorWorkbench />);
+    const input = screen.getByLabelText("原文");
+    fireEvent.change(input, { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "使用 Google 翻译" }));
+
+    expect(input).toBeEnabled();
+    expect(screen.getByLabelText("源语言")).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: /Agnes 2\.0/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "使用 Bing 翻译" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Google 正在翻译" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "正在翻译" })).toBeDisabled();
+  });
+
+  it("主按钮状态、批量快照和较早内容提示随卡片状态变化", async () => {
+    const first = deferredResponse();
+    const second = deferredResponse();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    render(<TranslatorWorkbench />);
+    const input = screen.getByLabelText("原文");
+    expect(screen.getByRole("button", { name: "开始翻译" })).toBeDisabled();
+    fireEvent.change(input, { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+    expect(screen.getByRole("button", { name: "正在翻译" })).toBeDisabled();
+    expect(fetchMock.mock.calls.map((call) => JSON.parse((call[1] as RequestInit).body as string))).toEqual([
+      { text: "Hello", sourceLanguage: "auto", targetLanguage: "zh-CN", providers: ["google"] },
+      { text: "Hello", sourceLanguage: "auto", targetLanguage: "zh-CN", providers: ["bing"] },
+    ]);
+    first.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "你好", durationMs: 1 }] }), { status: 200 }));
+    second.resolve(new Response(JSON.stringify({ results: [{ provider: "bing", status: "error", error: "失败", code: "UPSTREAM_ERROR", durationMs: 1 }] }), { status: 200 }));
+    expect(await screen.findByRole("button", { name: "全部重新翻译" })).toBeEnabled();
+    fireEvent.change(input, { target: { value: "Changed" } });
+    expect(screen.getAllByText("基于较早内容")).toHaveLength(2);
+    fireEvent.change(input, { target: { value: "Hello" } });
+    expect(screen.queryByText("基于较早内容")).not.toBeInTheDocument();
+  });
+
+  it("全部重新翻译覆盖 success、error 和 idle 卡并使用当前共同快照", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "旧成功", durationMs: 1 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "bing", status: "error", error: "旧失败", code: "UPSTREAM_ERROR", durationMs: 1 }] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify({ results: [] }), { status: 200 }));
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "旧文本" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+    await screen.findByText("旧成功");
+    await screen.findByText("旧失败");
+    fireEvent.click(screen.getByRole("checkbox", { name: /Agnes 2\.0/ }));
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "新文本" } });
+    fireEvent.change(screen.getByLabelText("源语言"), { target: { value: "en" } });
+    fireEvent.change(screen.getByLabelText("目标语言"), { target: { value: "ja" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "全部重新翻译" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    expect(fetchMock.mock.calls.slice(2).map((call) => JSON.parse((call[1] as RequestInit).body as string))).toEqual([
+      { text: "新文本", sourceLanguage: "en", targetLanguage: "ja", providers: ["google"] },
+      { text: "新文本", sourceLanguage: "en", targetLanguage: "ja", providers: ["bing"] },
+      { text: "新文本", sourceLanguage: "en", targetLanguage: "ja", providers: ["agnes-2-0"] },
+    ]);
+  });
+
+  it("同时 pending 时取消 Google 只中止 Google，Bing 仍可成功", async () => {
+    const google = deferredResponse();
+    const bing = deferredResponse();
+    const signals: AbortSignal[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      signals.push(init!.signal as AbortSignal);
+      return signals.length === 1 ? google.promise : bing.promise;
+    });
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Google/ }));
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+    google.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "迟到 Google", durationMs: 1 }] }), { status: 200 }));
+    bing.resolve(new Response(JSON.stringify({ results: [{ provider: "bing", status: "success", translatedText: "Bing 成功", durationMs: 1 }] }), { status: 200 }));
+
+    expect(await screen.findByText("Bing 成功")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("迟到 Google")).not.toBeInTheDocument());
+  });
+
+  it("源语言和目标语言变化分别标记结果基于较早内容", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "结果", durationMs: 1 }] }), { status: 200 }),
+    );
+    render(<TranslatorWorkbench />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Bing/ }));
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+    await screen.findByText("结果");
+
+    fireEvent.change(screen.getByLabelText("源语言"), { target: { value: "en" } });
+    expect(screen.getByText("基于较早内容")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("源语言"), { target: { value: "auto" } });
+    expect(screen.queryByText("基于较早内容")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("目标语言"), { target: { value: "ja" } });
+    expect(screen.getByText("基于较早内容")).toBeInTheDocument();
+  });
+
   it("为每个 Provider 并行发送单独请求并按提交顺序渐进更新卡片", async () => {
     const google = deferredResponse();
     const bing = deferredResponse();
@@ -148,32 +415,23 @@ describe("TranslatorWorkbench", () => {
     expect(screen.getByTestId("results-section")).not.toHaveAttribute("aria-live");
   });
 
-  it("新批次取消旧请求并忽略旧批次迟到响应", async () => {
-    const oldGoogle = deferredResponse();
-    const oldBing = deferredResponse();
-    const newGoogle = deferredResponse();
-    const newBing = deferredResponse();
-    const signals: AbortSignal[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
-      signals.push(init!.signal as AbortSignal);
-      return [oldGoogle.promise, oldBing.promise, newGoogle.promise, newBing.promise][signals.length - 1];
-    });
+  it("任一卡片 pending 时批量按钮不启动重叠请求", () => {
+    const pending = deferredResponse();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValue(pending.promise);
     render(<TranslatorWorkbench />);
     const input = screen.getByLabelText("原文");
-    fireEvent.change(input, { target: { value: "旧原文" } });
+    fireEvent.change(input, { target: { value: "原文" } });
     fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
     fireEvent.change(input, { target: { value: "新原文" } });
-    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
 
-    expect(fetch).toHaveBeenCalledTimes(4);
-    expect(signals.slice(0, 2).every((signal) => signal.aborted)).toBe(true);
-    newGoogle.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "新结果", durationMs: 5 }] }), { status: 200 }));
-    expect(await screen.findByText("新结果")).toBeInTheDocument();
-    oldGoogle.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "旧结果", durationMs: 50 }] }), { status: 200 }));
-    expect(screen.queryByText("旧结果")).not.toBeInTheDocument();
+    const batchButton = screen.getByRole("button", { name: "正在翻译" });
+    expect(batchButton).toBeDisabled();
+    fireEvent.click(batchButton);
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("失败卡只重试自身并复用原文和语言快照，同时防止重复重试", async () => {
+  it("失败卡只重试自身并使用当前原文和语言，同时防止重复重试", async () => {
     const retry = deferredResponse();
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "error", error: "失败", code: "UPSTREAM_ERROR", durationMs: 3 }] }), { status: 200 }))
@@ -192,13 +450,13 @@ describe("TranslatorWorkbench", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).toEqual({
-      text: "原始文本",
+      text: "编辑后的文本",
       sourceLanguage: "auto",
       targetLanguage: "zh-CN",
       providers: ["google"],
     });
     expect(screen.getByLabelText("正在加载 Google 翻译结果")).toBeInTheDocument();
-    expect(screen.queryByText("保留结果")).not.toBeInTheDocument();
+    expect(screen.getByText("保留结果")).not.toBeVisible();
     expect(screen.getByRole("button", { name: "展开 Bing 翻译结果" })).toBeInTheDocument();
     retry.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "重试成功", durationMs: 6 }] }), { status: 200 }));
     expect(await screen.findByText("重试成功")).toBeInTheDocument();
@@ -222,14 +480,14 @@ describe("TranslatorWorkbench", () => {
 
     expect(await screen.findByText("翻译服务响应异常，请稍后重试")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开 Bing 翻译结果" })).toBeInTheDocument();
-    expect(screen.queryByText("保留译文")).not.toBeInTheDocument();
+    expect(screen.getByText("保留译文")).not.toBeVisible();
     const retryAgain = screen.getByRole("button", { name: "重试 Google 翻译" });
     fireEvent.click(retryAgain);
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(screen.getByLabelText("正在加载 Google 翻译结果")).toBeInTheDocument();
   });
 
-  it("重试复用批次中的非默认源语言和目标语言快照", async () => {
+  it("重试使用点击时的当前源语言和目标语言", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "error", error: "失败", code: "UPSTREAM_ERROR", durationMs: 3 }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "成功", durationMs: 4 }] }), { status: 200 }));
@@ -248,8 +506,8 @@ describe("TranslatorWorkbench", () => {
     await screen.findByText("成功");
     expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
       text: "Hello",
-      sourceLanguage: "en",
-      targetLanguage: "ja",
+      sourceLanguage: "fr",
+      targetLanguage: "de",
       providers: ["google"],
     });
   });
@@ -301,7 +559,7 @@ describe("TranslatorWorkbench", () => {
     expect(signals[1].aborted).toBe(true);
   });
 
-  it("翻译进行中清空只清空输入并保留当前批次卡片直到完成", async () => {
+  it("翻译进行中清空只清空输入并保留卡片且允许继续编辑语言", async () => {
     const google = deferredResponse();
     const bing = deferredResponse();
     vi.spyOn(globalThis, "fetch")
@@ -317,52 +575,12 @@ describe("TranslatorWorkbench", () => {
     expect(input).toHaveValue("");
     expect(screen.getByLabelText("正在加载 Google 翻译结果")).toBeInTheDocument();
     expect(screen.getByLabelText("正在加载 Bing 翻译结果")).toBeInTheDocument();
-    expect(screen.getByLabelText("源语言")).toBeDisabled();
+    expect(screen.getByLabelText("源语言")).toBeEnabled();
     google.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "谷歌完成", durationMs: 5 }] }), { status: 200 }));
     bing.resolve(new Response(JSON.stringify({ results: [{ provider: "bing", status: "success", translatedText: "必应完成", durationMs: 6 }] }), { status: 200 }));
     expect(await screen.findByText("谷歌完成")).toBeInTheDocument();
     expect(await screen.findByText("必应完成")).toBeInTheDocument();
     expect(screen.getByLabelText("源语言")).toBeEnabled();
-  });
-
-  it("旧批次重试结束不能解除新批次同 Provider 的重试锁", async () => {
-    const oldRetry = deferredResponse();
-    const newRetry = deferredResponse();
-    const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "error", error: "旧批次失败", code: "UPSTREAM_ERROR", durationMs: 1 }] }), { status: 200 }))
-      .mockReturnValueOnce(oldRetry.promise)
-      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "error", error: "新批次失败", code: "UPSTREAM_ERROR", durationMs: 2 }] }), { status: 200 }))
-      .mockReturnValueOnce(newRetry.promise);
-    render(<TranslatorWorkbench />);
-    fireEvent.click(screen.getByRole("checkbox", { name: /Bing/ }));
-    const input = screen.getByLabelText("原文");
-    fireEvent.change(input, { target: { value: "旧原文" } });
-    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
-    fireEvent.click(await screen.findByRole("button", { name: "重试 Google 翻译" }));
-
-    fireEvent.change(input, { target: { value: "新原文" } });
-    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
-    const newRetryButton = await screen.findByRole("button", { name: "重试 Google 翻译" });
-    fireEvent.click(newRetryButton);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-
-    const oldRetryResponse = {
-      ok: true,
-      clone() { return this; },
-      json: async () => ({ results: [{ provider: "google", status: "success", translatedText: "旧重试结果", durationMs: 9 }] }),
-    } as unknown as Response;
-    oldRetry.resolve(oldRetryResponse);
-    await oldRetry.promise;
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(screen.queryByText("旧重试结果")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("正在加载 Google 翻译结果")).toBeInTheDocument();
-    expect(screen.getByLabelText("源语言")).toBeDisabled();
-    fireEvent.click(newRetryButton);
-
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    newRetry.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "新重试结果", durationMs: 3 }] }), { status: 200 }));
-    expect(await screen.findByText("新重试结果")).toBeInTheDocument();
   });
 
   it("组件卸载时取消当前批次的所有请求", () => {
@@ -420,7 +638,9 @@ describe("TranslatorWorkbench", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     await user.click(screen.getByRole("button", { name: "清空原文" }));
     expect(input).toHaveValue("");
-    expect(screen.getByText("准备就绪")).toBeInTheDocument();
+    expect(screen.getAllByText("本次未能获得结果")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "重试 Google 翻译" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "重试 Bing 翻译" })).toBeDisabled();
   });
 
   it("复制成功后显示反馈", async () => {
@@ -446,6 +666,156 @@ describe("TranslatorWorkbench", () => {
     expect(screen.getByText("已复制")).toBeInTheDocument();
   });
 
+  it("复制失败被捕获且只显示目标 Provider 的短暂失败反馈", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("拒绝访问剪贴板"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "你好", durationMs: 1 }] }), { status: 200 }),
+    );
+    render(<TranslatorWorkbench />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Bing/ }));
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "复制 Google 翻译结果" }));
+
+    expect(await screen.findByText("复制失败")).toBeInTheDocument();
+    expect(screen.queryByText("已复制")).not.toBeInTheDocument();
+  });
+
+  it("旧译文延迟复制期间重新翻译后不会把新译文标为已复制", async () => {
+    let resolveCopy!: () => void;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockReturnValue(new Promise<void>((resolve) => { resolveCopy = resolve; })) },
+    });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "译文 A", durationMs: 1 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "译文 B", durationMs: 1 }] }), { status: 200 }));
+    render(<TranslatorWorkbench />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Bing/ }));
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "A" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+    fireEvent.click(await screen.findByRole("button", { name: "复制 Google 翻译结果" }));
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "B" } });
+    fireEvent.click(screen.getByRole("button", { name: "重新执行 Google 翻译" }));
+    await screen.findByText("译文 B");
+
+    resolveCopy();
+    await act(async () => Promise.resolve());
+    expect(screen.getByRole("button", { name: "复制 Google 翻译结果" })).toHaveTextContent("复制");
+    expect(screen.queryByText("已复制")).not.toBeInTheDocument();
+  });
+
+  it("执行目标卡不会清除另一卡的复制反馈", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "谷歌", durationMs: 1 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "bing", status: "success", translatedText: "必应", durationMs: 1 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "新谷歌", durationMs: 1 }] }), { status: 200 }));
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+    await screen.findByText("谷歌");
+    await screen.findByText("必应");
+    fireEvent.click(screen.getByRole("button", { name: "复制 Bing 翻译结果" }));
+    await screen.findByText("已复制");
+
+    fireEvent.click(screen.getByRole("button", { name: "重新执行 Google 翻译" }));
+    await screen.findByText("新谷歌");
+    expect(screen.getByRole("button", { name: "复制 Bing 翻译结果" })).toHaveTextContent("已复制");
+  });
+
+  it("折叠时 aria-controls 指向的内容节点仍存在并隐藏", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "结果", durationMs: 1 }] }), { status: 200 }),
+    );
+    render(<TranslatorWorkbench />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Bing/ }));
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+    const collapse = await screen.findByRole("button", { name: "折叠 Google 翻译结果" });
+    const contentId = collapse.getAttribute("aria-controls")!;
+
+    fireEvent.click(collapse);
+
+    const content = document.getElementById(contentId);
+    expect(content).toBeInTheDocument();
+    expect(content).toHaveAttribute("hidden");
+  });
+
+  it("连续复制不同 Provider 时分别保持并独立清除反馈", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "谷歌译文", durationMs: 1 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "bing", status: "success", translatedText: "必应译文", durationMs: 1 }] }), { status: 200 }));
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+    await screen.findByText("谷歌译文");
+    await screen.findByText("必应译文");
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "复制 Google 翻译结果" }));
+    await act(async () => Promise.resolve());
+    act(() => vi.advanceTimersByTime(800));
+    fireEvent.click(screen.getByRole("button", { name: "复制 Bing 翻译结果" }));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getAllByText("已复制")).toHaveLength(2);
+    act(() => vi.advanceTimersByTime(800));
+    expect(screen.getByRole("button", { name: "复制 Google 翻译结果" })).toHaveTextContent("复制");
+    expect(screen.getByRole("button", { name: "复制 Bing 翻译结果" })).toHaveTextContent("已复制");
+    act(() => vi.advanceTimersByTime(800));
+    expect(screen.queryByText("已复制")).not.toBeInTheDocument();
+  });
+
+  it("删除 Provider 和卸载组件会清理各自的复制反馈 timer", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "谷歌译文", durationMs: 1 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ provider: "bing", status: "success", translatedText: "必应译文", durationMs: 1 }] }), { status: 200 }));
+    const { unmount } = render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+    await screen.findByText("谷歌译文");
+    await screen.findByText("必应译文");
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+    fireEvent.click(screen.getByRole("button", { name: "复制 Google 翻译结果" }));
+    fireEvent.click(screen.getByRole("button", { name: "复制 Bing 翻译结果" }));
+    await act(async () => Promise.resolve());
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Google/ }));
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("复制尚未完成时删除卡片或卸载不会为旧卡创建反馈 timer", async () => {
+    let resolveCopy!: () => void;
+    const writeText = vi.fn().mockReturnValue(new Promise<void>((resolve) => { resolveCopy = resolve; }));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "谷歌译文", durationMs: 1 }] }), { status: 200 }),
+    );
+    const { unmount } = render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "使用 Google 翻译" }));
+    await screen.findByText("谷歌译文");
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+    fireEvent.click(screen.getByRole("button", { name: "复制 Google 翻译结果" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Google/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Google/ }));
+    unmount();
+
+    resolveCopy();
+    await act(async () => Promise.resolve());
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+  });
+
   it("默认仅选择 Google 和 Bing，两个 Agnes 可独立或同时选择", async () => {
     const user = userEvent.setup();
     render(<TranslatorWorkbench />);
@@ -468,7 +838,7 @@ describe("TranslatorWorkbench", () => {
     expect(agnes25).toBeChecked();
   });
 
-  it("提交时使用 Provider 快照并在加载期间锁定选择控件", async () => {
+  it("提交时使用 Provider 快照并在加载期间保持选择控件可编辑", async () => {
     const user = userEvent.setup();
     const pending = deferredResponse();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValue(pending.promise);
@@ -479,13 +849,13 @@ describe("TranslatorWorkbench", () => {
     await user.click(screen.getByRole("button", { name: "开始翻译" }));
 
     expect(fetchMock.mock.calls.map((call) => JSON.parse((call[1] as RequestInit).body as string).providers)).toEqual([["google"], ["bing"], ["agnes-2-0"]]);
-    expect(screen.getByRole("checkbox", { name: /Agnes 2\.0/ })).toBeDisabled();
-    expect(screen.getByLabelText("源语言")).toBeDisabled();
-    expect(screen.getByLabelText("目标语言")).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: /Agnes 2\.0/ })).toBeEnabled();
+    expect(screen.getByLabelText("源语言")).toBeEnabled();
+    expect(screen.getByLabelText("目标语言")).toBeEnabled();
     expect(screen.getByLabelText("正在加载 Agnes 2.0 翻译结果")).toBeInTheDocument();
 
     pending.resolve(new Response(JSON.stringify({ results: [] }), { status: 200 }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "开始翻译" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "全部重新翻译" })).toBeEnabled());
   });
 
   it("快速双击与连续快捷键只发送一次请求，请求结束后可再次提交", async () => {
@@ -668,7 +1038,7 @@ describe("TranslatorWorkbench", () => {
     expect(collapseGoogle).toHaveAttribute("aria-expanded", "true");
     await user.click(collapseGoogle);
 
-    expect(screen.queryByText("谷歌译文")).not.toBeInTheDocument();
+    expect(screen.getByText("谷歌译文")).not.toBeVisible();
     expect(screen.getByText("必应译文")).toBeInTheDocument();
     expect(screen.getAllByText("Google")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "复制 Google 翻译结果" })).toBeInTheDocument();

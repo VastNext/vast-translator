@@ -11,6 +11,7 @@ A lightweight, open-source text translation workbench that compares Google, Bing
 - Independently selectable Agnes 2.0 and Agnes 2.5 models, both unselected by default
 - Isolated provider failures with per-provider manual retry and a 12-second standard timeout
 - One-click copy and `Ctrl/⌘ + Enter` shortcut
+- Independent provider cards for first translation, retranslation, and failure retry without repeating completed providers
 - Switchable stacked and side-by-side desktop layouts with a saved preference
 - Stacked layout enforced at 900px and below without overwriting the desktop preference
 - Server-only credential handling
@@ -69,6 +70,8 @@ The Google and Bing providers use **undocumented web endpoints**, not supported 
 The app does not log translation text or provider credentials. Translation text is sent to every third-party provider you explicitly select, including the selected Agnes models. Do not submit secrets or sensitive personal data. Provider failures are reported independently and can be retried manually from their result card; the app does not retry automatically or fall back to another provider.
 
 On wide desktop screens, use the workbench control to switch between stacked and side-by-side layouts. The preference is saved in the current browser. At 900px and below, the interface temporarily enforces the stacked layout without overwriting that preference; widening the viewport restores the saved layout.
+
+Selecting a provider immediately adds an untranslated card without starting a request. Use the card action to translate it for the first time, retranslate a completed result, or retry a failure. These actions call only that provider and use the text and languages shown when clicked. The bottom “Retranslate all” action explicitly updates every selected provider. Deselecting a provider removes its card and cancels any request still in progress.
 
 ## ☁️ Deployment
 

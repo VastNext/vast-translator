@@ -21,9 +21,16 @@ type RequestSnapshot = {
   text: string;
   sourceLanguage: string;
   targetLanguage: string;
-  providers: ProviderId[];
 };
-type ResultSlot = { provider: ProviderId; status: "pending" } | { provider: ProviderId; status: "settled"; result: ProviderResult };
+type ResultSlot =
+  | { provider: ProviderId; status: "idle" }
+  | { provider: ProviderId; status: "pending"; snapshot: RequestSnapshot }
+  | { provider: ProviderId; status: "settled"; snapshot: RequestSnapshot; result: ProviderResult };
+type CopyFeedback = { provider: ProviderId; status: "success" | "error" };
+
+function sortSlots(slots: ResultSlot[]) {
+  return [...slots].sort((left, right) => providers.findIndex(({ id }) => id === left.provider) - providers.findIndex(({ id }) => id === right.provider));
+}
 
 function getStoredLayout(): WorkbenchLayout {
   try {
@@ -74,41 +81,50 @@ export function TranslatorWorkbench() {
   const [sourceLanguage, setSourceLanguage] = useState("auto");
   const [targetLanguage, setTargetLanguage] = useState("zh-CN");
   const [selectedProviders, setSelectedProviders] = useState<ProviderId[]>(["google", "bing"]);
-  const [slots, setSlots] = useState<ResultSlot[]>([]);
-  const [pendingProviders, setPendingProviders] = useState<ProviderId[]>([]);
-  const [copiedProvider, setCopiedProvider] = useState<ProviderId | null>(null);
+  const [slots, setSlots] = useState<ResultSlot[]>([
+    { provider: "google", status: "idle" },
+    { provider: "bing", status: "idle" },
+  ]);
+  const [copyFeedbacks, setCopyFeedbacks] = useState<CopyFeedback[]>([]);
   const [collapsedProviders, setCollapsedProviders] = useState<ProviderId[]>([]);
   const storedLayout = useSyncExternalStore(subscribeToStoredLayout, getStoredLayout, getServerLayout);
   const [sessionLayout, setSessionLayout] = useState<WorkbenchLayout | null>(null);
   const preferredLayout = sessionLayout ?? storedLayout;
   const narrowViewport = useSyncExternalStore(subscribeToNarrowViewport, getNarrowViewport, getServerNarrowViewport);
-  const batchRef = useRef<{ id: number; controller: AbortController; snapshot: RequestSnapshot } | null>(null);
-  const retryingRef = useRef(new Map<ProviderId, symbol>());
-  const loading = pendingProviders.length > 0;
+  const requestsRef = useRef(new Map<ProviderId, { controller: AbortController; token: symbol }>());
+  const copyTimersRef = useRef(new Map<ProviderId, number>());
+  const copyTokensRef = useRef(new Map<ProviderId, symbol>());
+  const loading = slots.some((slot) => slot.status === "pending");
   const results = slots.flatMap((slot) => slot.status === "settled" ? [slot.result] : []);
+  const hasSettled = slots.some((slot) => slot.status === "settled");
+  const batchAction = loading ? "正在翻译" : hasSettled ? "全部重新翻译" : "开始翻译";
   const effectiveLayout = narrowViewport ? "stacked" : preferredLayout;
 
-  useEffect(() => () => batchRef.current?.controller.abort(), []);
+  useEffect(() => () => {
+    requestsRef.current.forEach(({ controller }) => controller.abort());
+    requestsRef.current.clear();
+    copyTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    copyTimersRef.current.clear();
+    copyTokensRef.current.clear();
+  }, []);
 
   async function translate() {
-    if (!text.trim() || selectedProviders.length === 0) return;
-    const snapshot = { text, sourceLanguage, targetLanguage, providers: [...selectedProviders] };
-    if (batchRef.current && JSON.stringify(batchRef.current.snapshot) === JSON.stringify(snapshot) && loading) return;
-    batchRef.current?.controller.abort();
-    const batch = { id: (batchRef.current?.id ?? 0) + 1, controller: new AbortController(), snapshot };
-    batchRef.current = batch;
-    retryingRef.current.clear();
-    setCollapsedProviders([]);
-    setSlots(snapshot.providers.map((provider) => ({ provider, status: "pending" })));
-    setPendingProviders(snapshot.providers);
-    await Promise.allSettled(snapshot.providers.map((provider) => requestProvider(provider, snapshot, batch)));
+    if (!text.trim() || selectedProviders.length === 0 || requestsRef.current.size > 0) return;
+    const snapshot = { text, sourceLanguage, targetLanguage };
+    await Promise.allSettled(selectedProviders.map((provider) => executeProvider(provider, snapshot)));
   }
 
-  async function requestProvider(provider: ProviderId, snapshot: RequestSnapshot, batch: { id: number; controller: AbortController }) {
+  async function executeProvider(provider: ProviderId, snapshot: RequestSnapshot = { text, sourceLanguage, targetLanguage }) {
+    if (!snapshot.text.trim() || requestsRef.current.has(provider)) return;
+    clearCopyFeedback(provider);
+    const controller = new AbortController();
+    const token = Symbol(provider);
+    requestsRef.current.set(provider, { controller, token });
+    setSlots((current) => current.map((slot) => slot.provider === provider ? { provider, status: "pending", snapshot } : slot));
     let result: ProviderResult;
     try {
       const response = await fetch("/api/translate", {
-        method: "POST", headers: { "Content-Type": "application/json" }, signal: batch.controller.signal,
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({ ...snapshot, providers: [provider] }),
       });
       let data: unknown;
@@ -127,30 +143,26 @@ export function TranslatorWorkbench() {
       if (!providerResult) throw new Error("翻译服务响应异常，请稍后重试");
       result = providerResult;
     } catch (error) {
-      if (batch.controller.signal.aborted || batchRef.current?.id !== batch.id) return;
+      if (controller.signal.aborted || requestsRef.current.get(provider)?.token !== token) return;
       result = { provider, status: "error", code: "UPSTREAM_ERROR", error: error instanceof Error ? error.message : "翻译请求失败，请稍后重试", durationMs: 0 };
     }
-    if (batchRef.current?.id !== batch.id) return;
-    setSlots((current) => current.map((slot) => slot.provider === provider ? { provider, status: "settled", result } : slot));
-    setPendingProviders((current) => current.filter((item) => item !== provider));
-  }
-
-  async function retryProvider(provider: ProviderId) {
-    const currentBatch = batchRef.current;
-    if (!currentBatch || retryingRef.current.has(provider)) return;
-    const retryToken = Symbol(provider);
-    retryingRef.current.set(provider, retryToken);
-    setSlots((current) => current.map((slot) => slot.provider === provider ? { provider, status: "pending" } : slot));
-    setPendingProviders((current) => current.includes(provider) ? current : [...current, provider]);
-    try {
-      await requestProvider(provider, currentBatch.snapshot, currentBatch);
-    } finally {
-      if (retryingRef.current.get(provider) === retryToken) retryingRef.current.delete(provider);
-    }
+    if (requestsRef.current.get(provider)?.token !== token) return;
+    requestsRef.current.delete(provider);
+    setSlots((current) => current.map((slot) => slot.provider === provider ? { provider, status: "settled", snapshot, result } : slot));
   }
 
   function toggleProvider(provider: ProviderId) {
-    setSelectedProviders((current) => current.includes(provider) ? current.filter((item) => item !== provider) : [...current, provider]);
+    if (!selectedProviders.includes(provider)) {
+      setSelectedProviders([...selectedProviders, provider]);
+      setSlots((current) => sortSlots([...current.filter((slot) => slot.provider !== provider), { provider, status: "idle" }]));
+      return;
+    }
+    requestsRef.current.get(provider)?.controller.abort();
+    requestsRef.current.delete(provider);
+    clearCopyFeedback(provider);
+    setSelectedProviders(selectedProviders.filter((item) => item !== provider));
+    setSlots((current) => current.filter((slot) => slot.provider !== provider));
+    setCollapsedProviders((current) => current.filter((item) => item !== provider));
   }
 
   function toggleResult(provider: ProviderId) {
@@ -168,10 +180,37 @@ export function TranslatorWorkbench() {
     }
   }
 
+  function clearCopyFeedback(provider: ProviderId) {
+    const timer = copyTimersRef.current.get(provider);
+    if (timer !== undefined) window.clearTimeout(timer);
+    copyTimersRef.current.delete(provider);
+    copyTokensRef.current.delete(provider);
+    setCopyFeedbacks((current) => current.filter((feedback) => feedback.provider !== provider));
+  }
+
+  function showCopyFeedback(provider: ProviderId, token: symbol, status: CopyFeedback["status"]) {
+    setCopyFeedbacks((current) => [...current.filter((feedback) => feedback.provider !== provider), { provider, status }]);
+    const timer = window.setTimeout(() => {
+      if (copyTokensRef.current.get(provider) !== token) return;
+      copyTokensRef.current.delete(provider);
+      copyTimersRef.current.delete(provider);
+      setCopyFeedbacks((current) => current.filter((feedback) => feedback.provider !== provider));
+    }, 1600);
+    copyTimersRef.current.set(provider, timer);
+  }
+
   async function copyResult(provider: ProviderId, translatedText: string) {
-    await navigator.clipboard.writeText(translatedText);
-    setCopiedProvider(provider);
-    window.setTimeout(() => setCopiedProvider(null), 1600);
+    const token = Symbol(provider);
+    const previousTimer = copyTimersRef.current.get(provider);
+    if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+    copyTimersRef.current.delete(provider);
+    copyTokensRef.current.set(provider, token);
+    try {
+      await navigator.clipboard.writeText(translatedText);
+      if (copyTokensRef.current.get(provider) === token) showCopyFeedback(provider, token, "success");
+    } catch {
+      if (copyTokensRef.current.get(provider) === token) showCopyFeedback(provider, token, "error");
+    }
   }
 
   return (
@@ -193,26 +232,27 @@ export function TranslatorWorkbench() {
         <div className="workbench-layout" data-layout={effectiveLayout} data-testid="workbench-layout">
           <section className="translator" aria-label="文本翻译工作台">
           <div className="language-bar">
-            <label><span className="sr-only">源语言</span><select value={sourceLanguage} disabled={loading} onChange={(event) => setSourceLanguage(event.target.value)}>{languages.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}</select></label>
-            <button className="icon-button swap-button" type="button" onClick={() => { if (sourceLanguage !== "auto") { setSourceLanguage(targetLanguage); setTargetLanguage(sourceLanguage); } }} disabled={sourceLanguage === "auto" || loading} aria-label="交换语言"><SwapIcon /></button>
-            <label><span className="sr-only">目标语言</span><select value={targetLanguage} disabled={loading} onChange={(event) => setTargetLanguage(event.target.value)}>{languages.filter((language) => language.code !== "auto").map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}</select></label>
+            <label><span className="sr-only">源语言</span><select value={sourceLanguage} onChange={(event) => setSourceLanguage(event.target.value)}>{languages.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}</select></label>
+            <button className="icon-button swap-button" type="button" onClick={() => { if (sourceLanguage !== "auto") { setSourceLanguage(targetLanguage); setTargetLanguage(sourceLanguage); } }} disabled={sourceLanguage === "auto"} aria-label="交换语言"><SwapIcon /></button>
+            <label><span className="sr-only">目标语言</span><select value={targetLanguage} onChange={(event) => setTargetLanguage(event.target.value)}>{languages.filter((language) => language.code !== "auto").map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}</select></label>
           </div>
           <div className="input-panel">
             <textarea aria-label="原文" value={text} maxLength={5000} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void translate(); } }} placeholder="输入或粘贴需要翻译的文本……" />
-            {text && <button className="clear-button" type="button" onClick={() => { setText(""); if (!loading) setSlots([]); }} aria-label="清空原文"><CloseIcon /></button>}
+            {text && <button className="clear-button" type="button" onClick={() => setText("")} aria-label="清空原文"><CloseIcon /></button>}
             <div className="input-footer"><span>{text.length} / 5000</span><span className="shortcut">Ctrl ↵ 翻译</span></div>
           </div>
           <div className="action-row">
-            <fieldset className="provider-picker" disabled={loading}><legend className="sr-only">翻译服务</legend>{providers.map((provider) => <label key={provider.id} className={selectedProviders.includes(provider.id) ? "provider-chip selected" : "provider-chip"}><input type="checkbox" checked={selectedProviders.includes(provider.id)} onChange={() => toggleProvider(provider.id)} /><span className={`provider-dot ${provider.id}`} /><span>{provider.label}</span><small>{provider.hint}</small></label>)}</fieldset>
-             <button className="translate-button" type="button" aria-label="开始翻译" onClick={() => void translate()} disabled={!text.trim() || selectedProviders.length === 0}><span>{loading ? "正在翻译" : "开始翻译"}</span>{loading ? <span className="spinner" /> : <ArrowIcon />}</button>
+            <fieldset className="provider-picker"><legend className="sr-only">翻译服务</legend>{providers.map((provider) => <label key={provider.id} className={selectedProviders.includes(provider.id) ? "provider-chip selected" : "provider-chip"}><input type="checkbox" checked={selectedProviders.includes(provider.id)} onChange={() => toggleProvider(provider.id)} /><span className={`provider-dot ${provider.id}`} /><span>{provider.label}</span><small>{provider.hint}</small></label>)}</fieldset>
+             <button className="translate-button" type="button" aria-label={batchAction} onClick={() => void translate()} disabled={!text.trim() || selectedProviders.length === 0 || loading}><span>{batchAction}</span>{loading ? <span className="spinner" /> : <ArrowIcon />}</button>
           </div>
           </section>
           <section className="results-section" data-testid="results-section">
           <div className="section-heading" data-testid="results-heading"><h2>翻译结果</h2><span>{results.length ? `${results.filter((result) => result.status === "success").length} 项可用` : "结果将在这里并排呈现"}</span></div>
           <div className="results-grid" data-testid="results-grid">
-            {slots.map((slot) => slot.status === "pending"
-              ? <ResultSkeleton key={slot.provider} provider={slot.provider} />
-              : <ResultPanel key={slot.provider} result={slot.result} collapsed={collapsedProviders.includes(slot.provider)} copied={copiedProvider === slot.provider} onCopy={copyResult} onToggle={toggleResult} onRetry={retryProvider} />)}
+            {slots.map((slot) => slot.status === "idle"
+              ? <IdleResultPanel key={slot.provider} provider={slot.provider} disabled={!text.trim()} onExecute={executeProvider} />
+              : slot.status === "pending" ? <ResultSkeleton key={slot.provider} provider={slot.provider} />
+              : <ResultPanel key={slot.provider} result={slot.result} stale={slot.snapshot.text !== text || slot.snapshot.sourceLanguage !== sourceLanguage || slot.snapshot.targetLanguage !== targetLanguage} collapsed={collapsedProviders.includes(slot.provider)} copyStatus={copyFeedbacks.find((feedback) => feedback.provider === slot.provider)?.status} disabled={!text.trim()} onCopy={copyResult} onToggle={toggleResult} onExecute={executeProvider} />)}
             {slots.length === 0 && <div className="empty-state"><TranslateIcon /><p>准备就绪</p><span>输入文本并选择翻译服务，然后开始比较。</span></div>}
           </div>
           </section>
@@ -223,17 +263,24 @@ export function TranslatorWorkbench() {
   );
 }
 
-function ResultSkeleton({ provider }: { provider: ProviderId }) {
-  return <article className="result-panel loading-panel" aria-label={`正在加载 ${providerLabels[provider]} 翻译结果`} aria-busy="true"><header><div className="result-provider"><span className={`provider-dot ${provider}`} /><strong>{providerLabels[provider]}</strong></div></header><div className="skeleton-line wide" /><div className="skeleton-line" /><div className="skeleton-line short" /></article>;
+function IdleResultPanel({ provider, disabled, onExecute }: { provider: ProviderId; disabled: boolean; onExecute: (provider: ProviderId) => Promise<void> }) {
+  const label = providerLabels[provider];
+  return <article className="result-panel idle" aria-label={`${label} 翻译卡片`}><header><div className="result-provider"><span className={`provider-dot ${provider}`} /><strong>{label}</strong></div><div className="result-actions"><button type="button" disabled={disabled} onClick={() => void onExecute(provider)} aria-label={`使用 ${label} 翻译`}><TranslateIcon /><span>翻译</span></button></div></header><div className="result-idle"><strong>尚未翻译</strong><span>输入文本后可单独翻译此服务。</span></div></article>;
 }
 
-function ResultPanel({ result, collapsed, copied, onCopy, onToggle, onRetry }: {
+function ResultSkeleton({ provider }: { provider: ProviderId }) {
+  return <article className="result-panel loading-panel" aria-label={`正在加载 ${providerLabels[provider]} 翻译结果`} aria-busy="true"><header><div className="result-provider"><span className={`provider-dot ${provider}`} /><strong>{providerLabels[provider]}</strong></div><div className="result-actions"><button type="button" disabled aria-label={`${providerLabels[provider]} 正在翻译`}><span>正在翻译</span></button></div></header><div className="skeleton-line wide" /><div className="skeleton-line" /><div className="skeleton-line short" /></article>;
+}
+
+function ResultPanel({ result, stale, collapsed, copyStatus, disabled, onCopy, onToggle, onExecute }: {
   result: ProviderResult;
+  stale: boolean;
   collapsed: boolean;
-  copied: boolean;
+  copyStatus?: CopyFeedback["status"];
+  disabled: boolean;
   onCopy: (provider: ProviderId, translatedText: string) => Promise<void>;
   onToggle: (provider: ProviderId) => void;
-  onRetry: (provider: ProviderId) => Promise<void>;
+  onExecute: (provider: ProviderId) => Promise<void>;
 }) {
   const label = providerLabels[result.provider];
   const contentId = `result-content-${result.provider}`;
@@ -241,14 +288,15 @@ function ResultPanel({ result, collapsed, copied, onCopy, onToggle, onRetry }: {
     <article className={`result-panel ${result.status}${collapsed ? " collapsed" : ""}`}>
       <span className="sr-only" role="status">{result.status === "success" ? `${label} 翻译完成：${result.translatedText}` : `${label} 翻译失败：${result.error}`}</span>
       <header>
-        <div className="result-provider"><span className={`provider-dot ${result.provider}`} /><strong>{label}</strong><span>{result.durationMs} ms</span></div>
+        <div className="result-provider"><span className={`provider-dot ${result.provider}`} /><strong>{label}</strong><span>{result.durationMs} ms</span>{stale && <span className="stale-result">基于较早内容</span>}</div>
         <div className="result-actions">
-          {result.status === "success" && <button type="button" onClick={() => void onCopy(result.provider, result.translatedText)} aria-label={`复制 ${label} 翻译结果`}><CopyIcon /><span>{copied ? "已复制" : "复制"}</span></button>}
-          {result.status === "error" && <button className="retry-button" type="button" onClick={() => void onRetry(result.provider)} aria-label={`重试 ${label} 翻译`}><RetryIcon /><span>重试</span></button>}
+          {result.status === "success" && <button type="button" onClick={() => void onCopy(result.provider, result.translatedText)} aria-label={`复制 ${label} 翻译结果`}><CopyIcon /><span>{copyStatus === "success" ? "已复制" : copyStatus === "error" ? "复制失败" : "复制"}</span></button>}
+          {result.status === "success" && <button type="button" disabled={disabled} onClick={() => void onExecute(result.provider)} aria-label={`重新执行 ${label} 翻译`}><TranslateIcon /><span>重新翻译</span></button>}
+          {result.status === "error" && <button className="retry-button" type="button" disabled={disabled} onClick={() => void onExecute(result.provider)} aria-label={`重试 ${label} 翻译`}><RetryIcon /><span>重试</span></button>}
           <button type="button" onClick={() => onToggle(result.provider)} aria-label={`${collapsed ? "展开" : "折叠"} ${label} 翻译结果`} aria-expanded={!collapsed} aria-controls={contentId}><CollapseIcon expanded={!collapsed} /></button>
         </div>
       </header>
-      {!collapsed && <div id={contentId}>{result.status === "success" ? <p className="translated-text">{result.translatedText}</p> : <div className="result-error"><strong>本次未能获得结果</strong><span>{result.error}</span></div>}</div>}
+      <div id={contentId} hidden={collapsed}>{result.status === "success" ? <p className="translated-text">{result.translatedText}</p> : <div className="result-error"><strong>本次未能获得结果</strong><span>{result.error}</span></div>}</div>
     </article>
   );
 }
