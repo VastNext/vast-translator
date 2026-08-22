@@ -37,8 +37,7 @@ function stripGoogleHtml(value: string) {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
+    .replace(/&#39;/g, "'");
 }
 
 export class GoogleWebProvider implements TranslationProvider {
@@ -53,7 +52,7 @@ export class GoogleWebProvider implements TranslationProvider {
       anno: "3",
       client: "te",
       v: "1.0",
-      format: "html",
+      format: "text",
       sl: input.sourceLanguage,
       tl: input.targetLanguage,
       tk: calculateGoogleToken(input.text),
