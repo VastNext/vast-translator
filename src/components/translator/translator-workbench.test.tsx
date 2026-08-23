@@ -49,6 +49,211 @@ afterEach(() => {
 });
 
 describe("TranslatorWorkbench", () => {
+  it.each([
+    ["缺少存储", null, ["Google", "Bing"]],
+    ["合法空数组", "[]", []],
+    ["仅未知和重复未知 ID", JSON.stringify(["unknown", "retired", "unknown"]), []],
+    ["未知和重复 ID", JSON.stringify(["agnes-2-5", "unknown", "google", "agnes-2-5", "google"]), ["Google", "Agnes 2.5"]],
+    ["非法 JSON", "not-json", ["Google", "Bing"]],
+    ["非数组值", JSON.stringify({ provider: "azure" }), ["Google", "Bing"]],
+  ])("恢复 Provider 选择：%s", async (_caseName, storedValue, expectedProviders) => {
+    if (storedValue !== null) localStorage.setItem("vast-translator:providers", storedValue);
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    render(<TranslatorWorkbench />);
+
+    await waitFor(() => expect(
+      Array.from(screen.getByTestId("results-grid").querySelectorAll("article header strong"), (node) => node.textContent),
+    ).toEqual(expectedProviders));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("恢复 Provider 时按固定顺序排列合法 ID", async () => {
+    localStorage.setItem("vast-translator:providers", JSON.stringify(["agnes-2-0", "bing", "azure"]));
+
+    render(<TranslatorWorkbench />);
+
+    await waitFor(() => expect(
+      Array.from(screen.getByTestId("results-grid").querySelectorAll("article header strong"), (node) => node.textContent),
+    ).toEqual(["Bing", "Azure", "Agnes 2.0"]));
+  });
+
+  it("Provider 偏好读取异常时恢复 Google 和 Bing", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation((key) => {
+      if (key === "vast-translator:providers") throw new Error("读取失败");
+      return null;
+    });
+
+    render(<TranslatorWorkbench />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: /Google/ })).toBeChecked();
+      expect(screen.getByRole("checkbox", { name: /Bing/ })).toBeChecked();
+    });
+  });
+
+  it("选择变化立即保存完整 Provider 数组且不覆盖布局偏好", () => {
+    localStorage.setItem("vast-translator:layout", "side-by-side");
+    render(<TranslatorWorkbench />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Agnes 2\.0/ }));
+    expect(localStorage.getItem("vast-translator:providers")).toBe(JSON.stringify(["google", "bing", "agnes-2-0"]));
+    expect(localStorage.getItem("vast-translator:layout")).toBe("side-by-side");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Google/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Bing/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Agnes 2\.0/ }));
+    expect(localStorage.getItem("vast-translator:providers")).toBe("[]");
+  });
+
+  it("Provider 偏好写入失败时当前会话选择仍然生效", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation((key) => {
+      if (key === "vast-translator:providers") throw new Error("写入失败");
+    });
+    render(<TranslatorWorkbench />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Azure/ }));
+
+    expect(screen.getByRole("checkbox", { name: /Azure/ })).toBeChecked();
+    expect(screen.getByRole("article", { name: "Azure 翻译卡片" })).toHaveTextContent("尚未翻译");
+  });
+
+  it("本地新增 Provider 后外部恢复默认快照会移除新增卡片", async () => {
+    render(<TranslatorWorkbench />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Azure/ }));
+    expect(screen.getByRole("article", { name: "Azure 翻译卡片" })).toBeInTheDocument();
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "vast-translator:providers",
+      newValue: JSON.stringify(["google", "bing"]),
+    }));
+
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Azure/ })).not.toBeChecked());
+    expect(screen.queryByRole("article", { name: "Azure 翻译卡片" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Google/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Bing/ })).toBeChecked();
+  });
+
+  it("本地取消 Provider 后外部恢复同一旧快照会重新加入卡片", async () => {
+    localStorage.setItem("vast-translator:providers", JSON.stringify(["google", "bing", "azure"]));
+    render(<TranslatorWorkbench />);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Azure/ })).toBeChecked());
+    fireEvent.click(screen.getByRole("checkbox", { name: /Azure/ }));
+    expect(screen.queryByRole("article", { name: "Azure 翻译卡片" })).not.toBeInTheDocument();
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "vast-translator:providers",
+      newValue: JSON.stringify(["google", "bing", "azure"]),
+    }));
+
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Azure/ })).toBeChecked());
+    expect(screen.getByRole("article", { name: "Azure 翻译卡片" })).toHaveTextContent("尚未翻译");
+  });
+
+  it("Provider storage 同步增量保留结果、新增 idle 卡并移除旧卡", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "保留结果", durationMs: 1 }] }), { status: 200 }),
+    );
+    render(<TranslatorWorkbench />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Bing/ }));
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始翻译" }));
+    await screen.findByText("保留结果");
+
+    localStorage.setItem("vast-translator:providers", JSON.stringify(["google", "azure"]));
+    window.dispatchEvent(new StorageEvent("storage", { key: "vast-translator:providers" }));
+
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Azure/ })).toBeChecked());
+    expect(screen.getByText("保留结果")).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Azure 翻译卡片" })).toHaveTextContent("尚未翻译");
+    expect(screen.queryByRole("article", { name: "Bing 翻译卡片" })).not.toBeInTheDocument();
+  });
+
+  it("Provider storage 同步移除 pending 卡时中止请求且迟到响应无污染", async () => {
+    const pending = deferredResponse();
+    let signal!: AbortSignal;
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      signal = init!.signal as AbortSignal;
+      return pending.promise;
+    });
+    localStorage.setItem("vast-translator:providers", JSON.stringify(["google"]));
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(await screen.findByRole("button", { name: "使用 Google 翻译" }));
+
+    localStorage.setItem("vast-translator:providers", "[]");
+    window.dispatchEvent(new StorageEvent("storage", { key: "vast-translator:providers" }));
+
+    await waitFor(() => expect(signal.aborted).toBe(true));
+    expect(screen.queryByText("Google", { selector: "article strong" })).not.toBeInTheDocument();
+    pending.resolve(new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "迟到结果", durationMs: 1 }] }), { status: 200 }));
+    await act(async () => Promise.resolve());
+    expect(screen.queryByText("迟到结果")).not.toBeInTheDocument();
+  });
+
+  it("localStorage clear 恢复默认 Provider、移除并中止非默认 pending 卡且迟到响应无污染", async () => {
+    const pending = deferredResponse();
+    let signal!: AbortSignal;
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      signal = init!.signal as AbortSignal;
+      return pending.promise;
+    });
+    localStorage.setItem("vast-translator:providers", JSON.stringify(["azure"]));
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(await screen.findByRole("button", { name: "使用 Azure 翻译" }));
+
+    localStorage.clear();
+    window.dispatchEvent(new StorageEvent("storage", { key: null, newValue: null }));
+
+    await waitFor(() => expect(signal.aborted).toBe(true));
+    expect(screen.queryByRole("article", { name: "Azure 翻译卡片" })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Google 翻译卡片" })).toHaveTextContent("尚未翻译");
+    expect(screen.getByRole("article", { name: "Bing 翻译卡片" })).toHaveTextContent("尚未翻译");
+    pending.resolve(new Response(JSON.stringify({ results: [{ provider: "azure", status: "success", translatedText: "迟到 Azure", durationMs: 1 }] }), { status: 200 }));
+    await act(async () => Promise.resolve());
+    expect(screen.queryByText("迟到 Azure")).not.toBeInTheDocument();
+  });
+
+  it("removeItem 后恢复默认 Provider 并保留仍选默认 Provider 的既有结果", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ provider: "google", status: "success", translatedText: "保留 Google", durationMs: 1 }] }), { status: 200 }),
+    );
+    localStorage.setItem("vast-translator:providers", JSON.stringify(["google"]));
+    render(<TranslatorWorkbench />);
+    fireEvent.change(screen.getByLabelText("原文"), { target: { value: "Hello" } });
+    fireEvent.click(await screen.findByRole("button", { name: "使用 Google 翻译" }));
+    await screen.findByText("保留 Google");
+
+    localStorage.removeItem("vast-translator:providers");
+    window.dispatchEvent(new StorageEvent("storage", { key: "vast-translator:providers", newValue: null }));
+
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Bing/ })).toBeChecked());
+    expect(screen.getByText("保留 Google")).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Bing 翻译卡片" })).toHaveTextContent("尚未翻译");
+  });
+
+  it("Provider remove storage 事件读取失败时安全恢复默认选择", async () => {
+    localStorage.setItem("vast-translator:providers", JSON.stringify(["azure"]));
+    render(<TranslatorWorkbench />);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Azure/ })).toBeChecked());
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation((key) => {
+      if (key === "vast-translator:providers") throw new Error("读取失败");
+      return null;
+    });
+
+    expect(() => window.dispatchEvent(new StorageEvent("storage", {
+      key: "vast-translator:providers",
+      newValue: null,
+    }))).not.toThrow();
+
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: /Google/ })).toBeChecked();
+      expect(screen.getByRole("checkbox", { name: /Bing/ })).toBeChecked();
+    });
+    expect(screen.queryByRole("article", { name: "Azure 翻译卡片" })).not.toBeInTheDocument();
+  });
+
   it("StrictMode 下切换 Provider 不会重复创建卡片", () => {
     render(<StrictMode><TranslatorWorkbench /></StrictMode>);
 
@@ -813,7 +1018,7 @@ describe("TranslatorWorkbench", () => {
 
     resolveCopy();
     await act(async () => Promise.resolve());
-    expect(setTimeoutSpy).not.toHaveBeenCalled();
+    expect(setTimeoutSpy.mock.calls.some(([, delay]) => delay === 1600)).toBe(false);
   });
 
   it("默认仅选择 Google 和 Bing，两个 Agnes 可独立或同时选择", async () => {

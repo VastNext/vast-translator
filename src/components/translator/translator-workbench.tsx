@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { languages } from "@/lib/translation/languages";
 import type { ProviderId, ProviderResult } from "@/lib/translation/types";
@@ -15,6 +15,9 @@ const providers: Array<{ id: ProviderId; label: string; hint: string }> = [
 ];
 const providerLabels: Record<ProviderId, string> = { google: "Google", bing: "Bing", azure: "Azure", "agnes-2-0": "Agnes 2.0", "agnes-2-5": "Agnes 2.5" };
 const layoutStorageKey = "vast-translator:layout";
+const providerStorageKey = "vast-translator:providers";
+const defaultProviders: ProviderId[] = ["google", "bing"];
+const defaultProvidersSnapshot = JSON.stringify(defaultProviders);
 const narrowViewportQuery = "(max-width: 900px)";
 type WorkbenchLayout = "stacked" | "side-by-side";
 type RequestSnapshot = {
@@ -49,6 +52,25 @@ function subscribeToStoredLayout(onStoreChange: () => void) {
   return () => window.removeEventListener("storage", handleStorage);
 }
 
+function parseStoredProviders(value: string | null) {
+  if (value === null) return defaultProviders;
+  try {
+    const storedProviders: unknown = JSON.parse(value);
+    if (!Array.isArray(storedProviders)) return defaultProviders;
+    return providers.flatMap(({ id }) => storedProviders.includes(id) ? [id] : []);
+  } catch {
+    return defaultProviders;
+  }
+}
+
+function getStoredProvidersSnapshot() {
+  try {
+    return JSON.stringify(parseStoredProviders(window.localStorage.getItem(providerStorageKey)));
+  } catch {
+    return defaultProvidersSnapshot;
+  }
+}
+
 function getNarrowViewport() {
   return typeof window.matchMedia === "function" && window.matchMedia(narrowViewportQuery).matches;
 }
@@ -61,6 +83,7 @@ function subscribeToNarrowViewport(onStoreChange: () => void) {
 }
 
 const getServerLayout = (): WorkbenchLayout => "stacked";
+const getServerProvidersSnapshot = () => defaultProvidersSnapshot;
 const getServerNarrowViewport = () => false;
 
 function getProviderResult(data: unknown, provider: ProviderId): ProviderResult | null {
@@ -80,25 +103,71 @@ export function TranslatorWorkbench() {
   const [text, setText] = useState("");
   const [sourceLanguage, setSourceLanguage] = useState("auto");
   const [targetLanguage, setTargetLanguage] = useState("zh-CN");
-  const [selectedProviders, setSelectedProviders] = useState<ProviderId[]>(["google", "bing"]);
-  const [slots, setSlots] = useState<ResultSlot[]>([
-    { provider: "google", status: "idle" },
-    { provider: "bing", status: "idle" },
-  ]);
+  const [selectedProviders, setSelectedProviders] = useState<ProviderId[]>(defaultProviders);
+  const [slots, setSlots] = useState<ResultSlot[]>(defaultProviders.map((provider) => ({ provider, status: "idle" })));
   const [copyFeedbacks, setCopyFeedbacks] = useState<CopyFeedback[]>([]);
   const [collapsedProviders, setCollapsedProviders] = useState<ProviderId[]>([]);
+  const [appliedProvidersSnapshot, setAppliedProvidersSnapshot] = useState(defaultProvidersSnapshot);
+  const requestsRef = useRef(new Map<ProviderId, { controller: AbortController; token: symbol }>());
+  const copyTimersRef = useRef(new Map<ProviderId, number>());
+  const copyTokensRef = useRef(new Map<ProviderId, symbol>());
+  const providersSnapshotRef = useRef<string | null>(null);
+  const getProvidersSnapshot = useCallback(() => {
+    providersSnapshotRef.current ??= getStoredProvidersSnapshot();
+    return providersSnapshotRef.current;
+  }, []);
+  const subscribeToStoredProviders = useCallback((onStoreChange: () => void) => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== providerStorageKey && event.key !== null) return;
+      let storedValue = event.key === null ? null : event.newValue;
+      if (event.key !== null && storedValue === null) {
+        try {
+          storedValue = window.localStorage.getItem(providerStorageKey);
+        } catch {
+          storedValue = null;
+        }
+      }
+      const nextSnapshot = JSON.stringify(parseStoredProviders(storedValue));
+      const selected = new Set(JSON.parse(nextSnapshot) as ProviderId[]);
+      requestsRef.current.forEach(({ controller }, provider) => {
+        if (!selected.has(provider)) {
+          controller.abort();
+          requestsRef.current.delete(provider);
+        }
+      });
+      copyTimersRef.current.forEach((timer, provider) => {
+        if (!selected.has(provider)) {
+          window.clearTimeout(timer);
+          copyTimersRef.current.delete(provider);
+          copyTokensRef.current.delete(provider);
+        }
+      });
+      providersSnapshotRef.current = nextSnapshot;
+      onStoreChange();
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+  const storedProvidersSnapshot = useSyncExternalStore(subscribeToStoredProviders, getProvidersSnapshot, getServerProvidersSnapshot);
   const storedLayout = useSyncExternalStore(subscribeToStoredLayout, getStoredLayout, getServerLayout);
   const [sessionLayout, setSessionLayout] = useState<WorkbenchLayout | null>(null);
   const preferredLayout = sessionLayout ?? storedLayout;
   const narrowViewport = useSyncExternalStore(subscribeToNarrowViewport, getNarrowViewport, getServerNarrowViewport);
-  const requestsRef = useRef(new Map<ProviderId, { controller: AbortController; token: symbol }>());
-  const copyTimersRef = useRef(new Map<ProviderId, number>());
-  const copyTokensRef = useRef(new Map<ProviderId, symbol>());
   const loading = slots.some((slot) => slot.status === "pending");
   const results = slots.flatMap((slot) => slot.status === "settled" ? [slot.result] : []);
   const hasSettled = slots.some((slot) => slot.status === "settled");
   const batchAction = loading ? "正在翻译" : hasSettled ? "全部重新翻译" : "开始翻译";
   const effectiveLayout = narrowViewport ? "stacked" : preferredLayout;
+
+  if (appliedProvidersSnapshot !== storedProvidersSnapshot) {
+    const storedProviders = JSON.parse(storedProvidersSnapshot) as ProviderId[];
+    const selected = new Set(storedProviders);
+    setAppliedProvidersSnapshot(storedProvidersSnapshot);
+    setSelectedProviders(storedProviders);
+    setSlots((current) => sortSlots(storedProviders.map((provider) => current.find((slot) => slot.provider === provider) ?? { provider, status: "idle" })));
+    setCopyFeedbacks((current) => current.filter(({ provider }) => selected.has(provider)));
+    setCollapsedProviders((current) => current.filter((provider) => selected.has(provider)));
+  }
 
   useEffect(() => () => {
     requestsRef.current.forEach(({ controller }) => controller.abort());
@@ -152,15 +221,25 @@ export function TranslatorWorkbench() {
   }
 
   function toggleProvider(provider: ProviderId) {
+    const nextProviders = providers.flatMap(({ id }) => (id === provider
+      ? selectedProviders.includes(id) ? [] : [id]
+      : selectedProviders.includes(id) ? [id] : []));
+    const nextSnapshot = JSON.stringify(nextProviders);
+    providersSnapshotRef.current = nextSnapshot;
+    setAppliedProvidersSnapshot(nextSnapshot);
+    setSelectedProviders(nextProviders);
+    try {
+      window.localStorage.setItem(providerStorageKey, nextSnapshot);
+    } catch {
+      // 持久化失败时仍保留当前会话中的 Provider 选择。
+    }
     if (!selectedProviders.includes(provider)) {
-      setSelectedProviders([...selectedProviders, provider]);
       setSlots((current) => sortSlots([...current.filter((slot) => slot.provider !== provider), { provider, status: "idle" }]));
       return;
     }
     requestsRef.current.get(provider)?.controller.abort();
     requestsRef.current.delete(provider);
     clearCopyFeedback(provider);
-    setSelectedProviders(selectedProviders.filter((item) => item !== provider));
     setSlots((current) => current.filter((slot) => slot.provider !== provider));
     setCollapsedProviders((current) => current.filter((item) => item !== provider));
   }

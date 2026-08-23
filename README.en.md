@@ -73,6 +73,8 @@ On wide desktop screens, use the workbench control to switch between stacked and
 
 Selecting a provider immediately adds an untranslated card without starting a request. Use the card action to translate it for the first time, retranslate a completed result, or retry a failure. These actions call only that provider and use the text and languages shown when clicked. The bottom “Retranslate all” action explicitly updates every selected provider. Deselecting a provider removes its card and cancels any request still in progress.
 
+Provider selections are saved in the current browser and synchronized when another tab changes them. Restoring a selection only creates untranslated cards and never starts translation automatically; unknown or retired providers are ignored.
+
 ## ☁️ Deployment
 
 The app requires the dynamic `POST /api/translate` Route Handler, so GitHub Pages alone is not sufficient. The included GitHub Actions workflow deploys to Vercel using `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` repository secrets.
