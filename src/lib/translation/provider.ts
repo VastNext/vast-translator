@@ -15,6 +15,7 @@ export interface TranslationProvider {
   readonly id: ProviderId;
   readonly label: string;
   readonly available: boolean;
+  readonly timeoutMs?: number | null;
   translate(input: ProviderInput, signal?: AbortSignal): Promise<ProviderOutput>;
 }
 

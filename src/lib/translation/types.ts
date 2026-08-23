@@ -1,4 +1,10 @@
-export const providerIds = ["google", "bing", "azure"] as const;
+export const providerIds = [
+  "google",
+  "bing",
+  "azure",
+  "agnes-2-0",
+  "agnes-2-5",
+] as const;
 
 export type ProviderId = (typeof providerIds)[number];
 

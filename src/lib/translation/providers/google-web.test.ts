@@ -29,8 +29,42 @@ describe("GoogleWebProvider", () => {
     expect(String(url)).toContain("translate.googleapis.com/translate_a/t");
     expect(String(url)).toContain("sl=auto");
     expect(String(url)).toContain("tl=zh-CN");
+    expect(String(url)).toContain("format=text");
     expect(options.method).toBe("POST");
     expect(options.body).toBe("q=Hello");
+  });
+
+  it("保留多行 Markdown 响应中的换行", async () => {
+    const translatedText = "# 标题\n\n- 第一项\n- 第二项";
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([[translatedText, "en"]]), { status: 200 }),
+    );
+    const provider = new GoogleWebProvider(fetcher);
+
+    await expect(
+      provider.translate({
+        text: "# Title\n\n- First\n- Second",
+        sourceLanguage: "auto",
+        targetLanguage: "zh-CN",
+      }),
+    ).resolves.toEqual({ translatedText, detectedLanguage: "en" });
+  });
+
+  it("保留 text 响应首尾的 LF 和 CRLF", async () => {
+    const translatedText = "\n\r\n翻译结果\r\n\n";
+    const provider = new GoogleWebProvider(
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([[translatedText, "en"]]), { status: 200 }),
+      ),
+    );
+
+    await expect(
+      provider.translate({
+        text: "\n\r\nTranslation\r\n\n",
+        sourceLanguage: "auto",
+        targetLanguage: "zh-CN",
+      }),
+    ).resolves.toEqual({ translatedText, detectedLanguage: "en" });
   });
 
   it("拒绝上游错误", async () => {

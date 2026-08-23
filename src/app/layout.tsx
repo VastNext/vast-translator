@@ -15,7 +15,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Vast Translator｜多引擎文本翻译",
-  description: "同时比较 Google、Bing 与可选 Azure 的翻译结果。",
+  description:
+    "同时比较 Google、Bing、可选 Azure 与 Agnes 2.0/2.5 的翻译结果，支持上下和左右工作台布局。",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
