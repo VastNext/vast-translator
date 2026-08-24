@@ -9,7 +9,6 @@ import { ArrowIcon, CloseIcon, CollapseIcon, CopyIcon, RetryIcon, SwapIcon, Tran
 const providers: Array<{ id: ProviderId; label: string; hint: string }> = [
   { id: "google", label: "Google", hint: "网页接口" },
   { id: "bing", label: "Bing", hint: "网页接口" },
-  { id: "azure", label: "Azure", hint: "需配置" },
   { id: "agnes-2-0", label: "Agnes 2.0", hint: "AI 模型" },
   { id: "agnes-2-5", label: "Agnes 2.5", hint: "AI 模型" },
 ];
