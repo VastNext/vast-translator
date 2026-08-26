@@ -296,7 +296,7 @@ export function TranslatorWorkbench() {
       <header className="topbar">
         <Link className="brand" href="/" aria-label="Vast Translator 首页"><span className="brand-mark"><TranslateIcon /></span><span>Vast Translator</span></Link>
         <div className="topbar-note">多引擎文本翻译</div>
-        <a className="github-link" href="https://github.com/vastfuture/vast-translator" target="_blank" rel="noreferrer">GitHub</a>
+        <div className="brand-attribution">by <a href="https://vastnext.com" target="_blank" rel="noreferrer">VastNext</a></div>
       </header>
       <main className="workspace">
         <section className="intro" aria-labelledby="workbench-title">
@@ -336,7 +336,15 @@ export function TranslatorWorkbench() {
           </section>
         </div>
       </main>
-      <footer className="footer"><span>Vast Translator</span><span>Google / Bing 网页接口可能随时限流或变更</span></footer>
+      <footer className="footer">
+        <span>Vast Translator · 开源翻译工作台</span>
+        <nav className="product-links" aria-label="VastNext 产品家族">
+          <a href="https://vastnext.com" target="_blank" rel="noreferrer">VastNext</a>
+          <a href="https://findryai.com" target="_blank" rel="noreferrer">Findry AI</a>
+          <a href="https://pg.vastnext.com" target="_blank" rel="noreferrer">Password Generator</a>
+          <a href="https://github.com/VastNext/vast-translator" target="_blank" rel="noreferrer" aria-label="Vast Translator GitHub">GitHub</a>
+        </nav>
+      </footer>
     </div>
   );
 }
