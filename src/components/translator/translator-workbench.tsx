@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import Link from "next/link";
 import { languages } from "@/lib/translation/languages";
 import type { ProviderId, ProviderResult } from "@/lib/translation/types";
-import { ArrowIcon, CloseIcon, CollapseIcon, CopyIcon, RetryIcon, SwapIcon, TranslateIcon } from "./icons";
+import { ArrowIcon, CloseIcon, CollapseIcon, CopyIcon, GitHubIcon, RetryIcon, SwapIcon, TranslateIcon } from "./icons";
 
 const providers: Array<{ id: ProviderId; label: string; hint: string }> = [
   { id: "google", label: "Google", hint: "网页接口" },
@@ -297,6 +297,7 @@ export function TranslatorWorkbench() {
         <Link className="brand" href="/" aria-label="Vast Translator 首页"><span className="brand-mark"><TranslateIcon /></span><span>Vast Translator</span></Link>
         <div className="topbar-note">多引擎文本翻译</div>
         <div className="brand-attribution">by <a href="https://vastnext.com" target="_blank" rel="noreferrer">VastNext</a></div>
++       <a className="github-link" href="https://github.com/VastNext/vast-translator" target="_blank" rel="noreferrer"><GitHubIcon /><span>GitHub</span></a>
       </header>
       <main className="workspace">
         <section className="intro" aria-labelledby="workbench-title">
@@ -342,7 +343,6 @@ export function TranslatorWorkbench() {
           <a href="https://vastnext.com" target="_blank" rel="noreferrer">VastNext</a>
           <a href="https://findryai.com" target="_blank" rel="noreferrer">Findry AI</a>
           <a href="https://pg.vastnext.com" target="_blank" rel="noreferrer">Password Generator</a>
-          <a href="https://github.com/VastNext/vast-translator" target="_blank" rel="noreferrer" aria-label="Vast Translator GitHub">GitHub</a>
         </nav>
       </footer>
     </div>

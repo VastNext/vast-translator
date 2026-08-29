@@ -49,7 +49,7 @@ afterEach(() => {
 });
 
 describe("TranslatorWorkbench", () => {
-  it("产品家族导航提供 VastNext backlink 和其他产品入口", () => {
+  it("产品家族导航提供 VastNext backlink 和其他产品入口，GitHub 固定在顶栏", () => {
     render(<TranslatorWorkbench />);
 
     const vastNextLinks = screen.getAllByRole("link", { name: "VastNext" });
@@ -59,17 +59,22 @@ describe("TranslatorWorkbench", () => {
     const productLinks = [
       screen.getByRole("link", { name: "Findry AI" }),
       screen.getByRole("link", { name: "Password Generator" }),
-      screen.getByRole("link", { name: "Vast Translator GitHub" }),
     ];
     expect(productLinks.map((link) => link.getAttribute("href"))).toEqual([
       "https://findryai.com",
       "https://pg.vastnext.com",
-      "https://github.com/VastNext/vast-translator",
     ]);
     for (const link of [...vastNextLinks, ...productLinks]) {
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).toHaveAttribute("rel", "noreferrer");
     }
+
+    const githubLink = screen.getByRole("link", { name: "GitHub" });
+    expect(githubLink.getAttribute("href")).toBe("https://github.com/VastNext/vast-translator");
+    expect(githubLink).toHaveAttribute("target", "_blank");
+    expect(githubLink).toHaveAttribute("rel", "noreferrer");
+    expect(githubLink.querySelector("svg")).not.toBeNull();
+    expect(githubLink.closest("header")).not.toBeNull();
   });
 
   it("前端隐藏 Azure 并忽略旧缓存中的 Azure 选择", async () => {
