@@ -4,6 +4,25 @@ function Icon({ children, ...props }: SVGProps<SVGSVGElement>) {
   return <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>{children}</svg>;
 }
 
+export function BrandMarkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 320 320" fill="none" aria-hidden="true" {...props}>
+      <defs>
+        <linearGradient id="brand-sunset" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#3A7BD5" />
+          <stop offset="50%" stopColor="#8A58DC" />
+          <stop offset="100%" stopColor="#FF6A88" />
+        </linearGradient>
+      </defs>
+      <rect width="320" height="320" rx="72" fill="url(#brand-sunset)" />
+      <path d="M43 73V243L160 127L277 243V73" stroke="#FFFFFF" strokeWidth="27" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M43 73L160 193L277 73" stroke="#FFFFFF" strokeWidth="27" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M87 117L160 193L231 121" stroke="#B6A7F2" strokeWidth="20" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M160 193L228 239" stroke="#78DFC4" strokeWidth="20" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function TranslateIcon(props: SVGProps<SVGSVGElement>) {
   return <Icon {...props}><path d="M4 5h10M9 3v2m3 0c-1 4.2-3.7 7-7 8.5m2.3-5c1.2 2.1 2.9 3.7 5.2 4.8M14 21l3.5-8 3.5 8m-5.8-3h4.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></Icon>;
 }

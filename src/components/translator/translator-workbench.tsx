@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import Link from "next/link";
 import { languages } from "@/lib/translation/languages";
 import type { ProviderId, ProviderResult } from "@/lib/translation/types";
-import { ArrowIcon, CloseIcon, CollapseIcon, CopyIcon, FindryIcon, GitHubIcon, PasswordIcon, RetryIcon, SwapIcon, TranslateIcon, VastNextIcon } from "./icons";
+import { ArrowIcon, BrandMarkIcon, CloseIcon, CollapseIcon, CopyIcon, FindryIcon, GitHubIcon, PasswordIcon, RetryIcon, SwapIcon, TranslateIcon, VastNextIcon } from "./icons";
 
 const providers: Array<{ id: ProviderId; label: string; hint: string }> = [
   { id: "google", label: "Google", hint: "网页接口" },
@@ -294,7 +294,7 @@ export function TranslatorWorkbench() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <Link className="brand" href="/" aria-label="Vast Translator 首页"><span className="brand-mark"><TranslateIcon /></span><span>Vast Translator</span></Link>
+        <Link className="brand" href="/" aria-label="Vast Translator 首页"><span className="brand-mark"><BrandMarkIcon /></span><span>Vast Translator</span></Link>
         <div className="topbar-note">多引擎文本翻译</div>
         <a className="github-link" href="https://github.com/VastNext/vast-translator" target="_blank" rel="noreferrer"><GitHubIcon /><span>GitHub</span></a>
         <div className="brand-attribution">by <a href="https://vastnext.com" target="_blank" rel="noreferrer"><VastNextIcon /><span>VastNext</span></a></div>
