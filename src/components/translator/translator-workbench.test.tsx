@@ -76,6 +76,8 @@ describe("TranslatorWorkbench", () => {
     expect(githubLink).toHaveAttribute("rel", "noreferrer");
     expect(githubLink.querySelector("svg")).not.toBeNull();
     expect(githubLink.closest("header")).not.toBeNull();
+    expect(vastNextLinks[0].closest("header")).not.toBeNull();
+    expect(Boolean(githubLink.compareDocumentPosition(vastNextLinks[0]) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it("前端隐藏 Azure 并忽略旧缓存中的 Azure 选择", async () => {
