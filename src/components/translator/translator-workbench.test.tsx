@@ -52,13 +52,13 @@ describe("TranslatorWorkbench", () => {
   it("产品家族导航提供 VastNext backlink 和其他产品入口，GitHub 固定在顶栏", () => {
     render(<TranslatorWorkbench />);
 
-    const vastNextLinks = screen.getAllByRole("link", { name: "VastNext" });
+    const vastNextLinks = screen.getAllByRole("link", { name: /VastNext/ });
     expect(vastNextLinks).toHaveLength(2);
     expect(vastNextLinks.every((link) => link.getAttribute("href") === "https://vastnext.com")).toBe(true);
 
     const productLinks = [
-      screen.getByRole("link", { name: "Findry AI" }),
-      screen.getByRole("link", { name: "Password Generator" }),
+      screen.getByRole("link", { name: /Findry AI/ }),
+      screen.getByRole("link", { name: /Password Generator/ }),
     ];
     expect(productLinks.map((link) => link.getAttribute("href"))).toEqual([
       "https://findryai.com",
@@ -69,6 +69,10 @@ describe("TranslatorWorkbench", () => {
       expect(link).toHaveAttribute("rel", "noreferrer");
       expect(link.querySelector("svg")).not.toBeNull();
     }
+
+    expect(screen.getByText("精选 AI 工具导航")).toBeInTheDocument();
+    expect(screen.getByText("随机密码与 PIN 生成器")).toBeInTheDocument();
+    expect(screen.getByText("独立未来产品实验室")).toBeInTheDocument();
 
     const githubLink = screen.getByRole("link", { name: "GitHub" });
     expect(githubLink.getAttribute("href")).toBe("https://github.com/VastNext/vast-translator");

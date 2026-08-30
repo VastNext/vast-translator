@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import Link from "next/link";
 import { languages } from "@/lib/translation/languages";
 import type { ProviderId, ProviderResult } from "@/lib/translation/types";
-import { ArrowIcon, BrandMarkIcon, CloseIcon, CollapseIcon, CopyIcon, FindryIcon, GitHubIcon, PasswordIcon, RetryIcon, SwapIcon, TranslateIcon, VastNextIcon } from "./icons";
+import { ArrowIcon, BrandMarkIcon, CloseIcon, CollapseIcon, CopyIcon, FindryLogo, GitHubIcon, PasswordGeneratorLogo, RetryIcon, SwapIcon, TranslateIcon, VastNextIcon, VastNextLogo } from "./icons";
 
 const providers: Array<{ id: ProviderId; label: string; hint: string }> = [
   { id: "google", label: "Google", hint: "网页接口" },
@@ -338,12 +338,35 @@ export function TranslatorWorkbench() {
         </div>
       </main>
       <footer className="footer">
-        <span>Vast Translator · 开源翻译工作台</span>
-        <nav className="product-links" aria-label="VastNext 产品家族">
-          <a href="https://vastnext.com" target="_blank" rel="noreferrer"><VastNextIcon /><span>VastNext</span></a>
-          <a href="https://findryai.com" target="_blank" rel="noreferrer"><FindryIcon /><span>Findry AI</span></a>
-          <a href="https://pg.vastnext.com" target="_blank" rel="noreferrer"><PasswordIcon /><span>Password Generator</span></a>
-        </nav>
+        <div className="footer-content">
+          <nav className="product-cards" aria-label="VastNext 相关产品">
+            <a href="https://findryai.com" target="_blank" rel="noreferrer" title="Findry AI - 精选 AI 工具导航" className="product-card">
+              <span className="product-card-logo"><FindryLogo /></span>
+              <span className="product-card-info">
+                <strong className="product-card-name">Findry AI</strong>
+                <span className="product-card-desc">精选 AI 工具导航</span>
+              </span>
+            </a>
+            <a href="https://pg.vastnext.com" target="_blank" rel="noreferrer" title="Password Generator - 随机密码与 PIN 生成器" className="product-card">
+              <span className="product-card-logo"><PasswordGeneratorLogo /></span>
+              <span className="product-card-info">
+                <strong className="product-card-name">Password Generator</strong>
+                <span className="product-card-desc">随机密码与 PIN 生成器</span>
+              </span>
+            </a>
+            <a href="https://vastnext.com" target="_blank" rel="noreferrer" title="VastNext - 独立未来产品实验室" className="product-card">
+              <span className="product-card-logo"><VastNextLogo /></span>
+              <span className="product-card-info">
+                <strong className="product-card-name">VastNext</strong>
+                <span className="product-card-desc">独立未来产品实验室</span>
+              </span>
+            </a>
+          </nav>
+          <div className="footer-bottom">
+            <span>Vast Translator · 开源多引擎文本翻译工作台</span>
+            <span>Google / Bing 网页接口可能随时限流或变更</span>
+          </div>
+        </div>
       </footer>
     </div>
   );

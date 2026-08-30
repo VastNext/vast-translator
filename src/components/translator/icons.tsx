@@ -51,6 +51,53 @@ export function RetryIcon(props: SVGProps<SVGSVGElement>) {
   return <Icon {...props}><path d="M19 8a7 7 0 1 0 1 6M19 4v4h-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></Icon>;
 }
 
+export function VastNextLogo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" {...props}>
+      <rect width="64" height="64" rx="15" fill="#F7F8F3" />
+      <path d="M8 49C22 43 42 43 56 49" stroke="#78DFC4" strokeWidth="4" strokeLinecap="round" />
+      <path d="M14 24L27 42L44 22" stroke="#18235C" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M27 42L51 15" stroke="#246BFD" strokeWidth="6" strokeLinecap="round" />
+      <path d="M49 15L55 10L54 18" fill="#246BFD" stroke="#246BFD" strokeWidth="2" strokeLinejoin="round" />
+      <circle cx="51" cy="8" r="4" stroke="#F06F52" strokeWidth="2" />
+    </svg>
+  );
+}
+
+export function FindryLogo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 512 512" fill="none" aria-hidden="true" {...props}>
+      <defs>
+        <mask id="findry-card-mask">
+          <rect width="512" height="512" fill="white" />
+          <path
+            d="M48 512C58 451 104 403 165 350C213 308 228 270 205 228C192 204 162 190 162 161C162 111 235 97 326 97V54L436 121L326 210V168C275 168 232 178 232 207C232 225 263 240 282 267C320 322 294 374 246 421C207 460 188 485 185 512Z"
+            fill="black"
+          />
+        </mask>
+      </defs>
+      <rect width="512" height="512" rx="110" fill="#086B6D" />
+      <path
+        d="M100 16H476C496 16 512 32 512 52V101C512 140 481 171 442 171H426V257C426 292 400 320 365 326C325 331 301 349 301 387V488C301 501 290 512 277 512H48V68C48 39 71 16 100 16Z"
+        fill="#FFFFFF"
+        mask="url(#findry-card-mask)"
+      />
+    </svg>
+  );
+}
+
+export function PasswordGeneratorLogo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" {...props}>
+      <rect width="64" height="64" rx="15" fill="#15171A" />
+      <path d="M32 10a22 22 0 1 0 0 44" fill="none" stroke="#FFFFFF" strokeWidth="7" strokeLinecap="round" />
+      <path d="M32 10a22 22 0 0 1 21 15M53 39A22 22 0 0 1 32 54" fill="none" stroke="#2563EB" strokeWidth="7" strokeLinecap="round" />
+      <path d="M27 46V19h9.5a9.5 9.5 0 0 1 0 19H27" fill="none" stroke="#FFFFFF" strokeWidth="6" strokeLinejoin="round" />
+      <path d="M46 36h10v10" fill="none" stroke="#2563EB" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function GitHubIcon(props: SVGProps<SVGSVGElement>) {
   return <Icon {...props}><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.56 9.56 0 0 1 5 0c1.91-1.3 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z" /></Icon>;
 }
