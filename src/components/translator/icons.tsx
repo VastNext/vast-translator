@@ -56,13 +56,43 @@ export function GitHubIcon(props: SVGProps<SVGSVGElement>) {
 }
 
 export function VastNextIcon(props: SVGProps<SVGSVGElement>) {
-  return <Icon {...props}><path d="M2.5 17.8C7.5 19.8 14.5 19.8 21.5 17" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /><path d="M4 5.5 10.25 16 13.5 10 20 4v5.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /><circle cx="20" cy="4" r="1.5" fill="currentColor" /></Icon>;
+  return (
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" {...props}>
+      <path d="M8 49C22 43 42 43 56 49" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+      <path d="M14 24L27 42L44 22" stroke="currentColor" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M27 42L51 15" stroke="currentColor" strokeWidth="5.5" strokeLinecap="round" />
+      <path d="M49 15L55 10L54 18" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <circle cx="51" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
 }
 
 export function FindryIcon(props: SVGProps<SVGSVGElement>) {
-  return <Icon {...props}><circle cx="11" cy="11" r="6.2" stroke="currentColor" strokeWidth="1.8" /><path d="m20 20-3.6-3.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /><circle cx="9" cy="10" r="1.1" fill="currentColor" /><circle cx="13.5" cy="9" r="1.1" fill="currentColor" /><circle cx="11" cy="13.5" r="1.1" fill="currentColor" /><path d="M9 10l4.5-1M9 10l2 3.5M13.5 9l-2.5 4.5" stroke="currentColor" strokeWidth="1.1" /></Icon>;
+  return (
+    <svg viewBox="0 0 512 512" fill="none" aria-hidden="true" {...props}>
+      <defs>
+        <mask id="findry-icon-mask">
+          <rect width="512" height="512" fill="white" />
+          <path
+            d="M48 512C58 451 104 403 165 350C213 308 228 270 205 228C192 204 162 190 162 161C162 111 235 97 326 97V54L436 121L326 210V168C275 168 232 178 232 207C232 225 263 240 282 267C320 322 294 374 246 421C207 460 188 485 185 512Z"
+            fill="black"
+          />
+        </mask>
+      </defs>
+      <path
+        d="M100 16H476C496 16 512 32 512 52V101C512 140 481 171 442 171H426V257C426 292 400 320 365 326C325 331 301 349 301 387V488C301 501 290 512 277 512H48V68C48 39 71 16 100 16Z"
+        fill="currentColor"
+        mask="url(#findry-icon-mask)"
+      />
+    </svg>
+  );
 }
 
 export function PasswordIcon(props: SVGProps<SVGSVGElement>) {
-  return <Icon {...props}><path d="M12 3l7 2.9v5.6c0 4.5-2.9 7.6-7 9.5-4.1-1.9-7-5-7-9.5V5.9L12 3Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /><path d="m8.8 11.8 2.3 2.3 4.4-4.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></Icon>;
+  return (
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" {...props}>
+      <path d="M32 10L48 18v14c0 10-7 17-16 22-9-5-16-12-16-22V18L32 10Z" stroke="currentColor" strokeWidth="4.5" strokeLinejoin="round" strokeLinecap="round" />
+      <path d="m24 32 5 5 12-12" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
