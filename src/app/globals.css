@@ -12,7 +12,7 @@ button:focus-visible,a:focus-visible,select:focus-visible,textarea:focus-visible
 .brand { display:inline-flex;align-items:center;gap:11px;color:var(--ink);text-decoration:none;font-weight:690;letter-spacing:-.02em; }
 .brand-mark { width:34px;height:34px;display:grid;place-items:center;color:#fff;background:var(--blue);border-radius:10px 10px 10px 3px;box-shadow:0 7px 18px rgba(40,104,232,.2); }
 .brand-mark svg { width:21px;height:21px; }.topbar-note { margin-left:28px;padding-left:28px;border-left:1px solid var(--line);font-size:13px;color:var(--muted); }
-.brand-attribution { margin-left:28px;padding-left:28px;border-left:1px solid var(--line);color:#94a0b2;font-size:12px; }.brand-attribution a { color:#475569;text-decoration:none;font-weight:650; }.brand-attribution a:hover { color:var(--blue); }
+.brand-attribution { margin-left:28px;padding-left:28px;border-left:1px solid var(--line);color:#94a0b2;font-size:12px; }.brand-attribution a { display:inline-flex;align-items:center;gap:5px;color:#475569;text-decoration:none;font-weight:650; }.brand-attribution a svg { width:13px;height:13px; }.brand-attribution a:hover { color:var(--blue); }
 .github-link { margin-left:auto;display:inline-flex;align-items:center;gap:6px;color:#475569;text-decoration:none;font-size:14px;font-weight:550; }.github-link svg { width:17px;height:17px; }.github-link:hover { color:var(--blue); }
 .workspace { width:min(1180px,calc(100% - 48px));margin:0 auto;padding:58px 0 52px;flex:1; }
 .intro { display:flex;align-items:flex-end;justify-content:space-between;gap:36px;margin-bottom:30px;animation:rise .45s ease-out both; }

@@ -296,7 +296,7 @@ export function TranslatorWorkbench() {
       <header className="topbar">
         <Link className="brand" href="/" aria-label="Vast Translator 首页"><span className="brand-mark"><TranslateIcon /></span><span>Vast Translator</span></Link>
         <div className="topbar-note">多引擎文本翻译</div>
-        <div className="brand-attribution">by <a href="https://vastnext.com" target="_blank" rel="noreferrer">VastNext</a></div>
+        <div className="brand-attribution">by <a href="https://vastnext.com" target="_blank" rel="noreferrer"><VastNextIcon /><span>VastNext</span></a></div>
 +       <a className="github-link" href="https://github.com/VastNext/vast-translator" target="_blank" rel="noreferrer"><GitHubIcon /><span>GitHub</span></a>
       </header>
       <main className="workspace">

@@ -64,18 +64,11 @@ describe("TranslatorWorkbench", () => {
       "https://findryai.com",
       "https://pg.vastnext.com",
     ]);
-    for (const link of vastNextLinks) {
-      expect(link).toHaveAttribute("target", "_blank");
-      expect(link).toHaveAttribute("rel", "noreferrer");
-    }
-    for (const link of productLinks) {
+    for (const link of [...vastNextLinks, ...productLinks]) {
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).toHaveAttribute("rel", "noreferrer");
       expect(link.querySelector("svg")).not.toBeNull();
     }
-
-    const footerVastNext = vastNextLinks[1];
-    expect(footerVastNext.querySelector("svg")).not.toBeNull();
 
     const githubLink = screen.getByRole("link", { name: "GitHub" });
     expect(githubLink.getAttribute("href")).toBe("https://github.com/VastNext/vast-translator");
