@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="16" fill="#18235C"/>
-  <path d="M12 17L27 45L35 28L51 13V43" stroke="#F7F8F3" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M10 49C24 54 40 53 54 47" stroke="#55C6B3" stroke-width="4" stroke-linecap="round"/>
-  <circle cx="51" cy="13" r="5" fill="#F06F52"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" fill="none">
+  <defs>
+    <linearGradient id="sunset-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3A7BD5"/>
+      <stop offset="50%" stop-color="#8A58DC"/>
+      <stop offset="100%" stop-color="#FF6A88"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="320" rx="72" fill="url(#sunset-gradient)"/>
+  <path d="M43 73V243L160 127L277 243V73" stroke="#246BFD" stroke-width="27" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M43 73L160 193L277 73" stroke="#18235C" stroke-width="27" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M87 117L160 193L231 121" stroke="#B6A7F2" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M160 193L228 239" stroke="#78DFC4" stroke-width="20" stroke-linecap="round"/>
 </svg>
