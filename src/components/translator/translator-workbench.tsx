@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import Link from "next/link";
 import { languages } from "@/lib/translation/languages";
 import type { ProviderId, ProviderResult } from "@/lib/translation/types";
-import { ArrowIcon, CloseIcon, CollapseIcon, CopyIcon, GitHubIcon, RetryIcon, SwapIcon, TranslateIcon } from "./icons";
+import { ArrowIcon, CloseIcon, CollapseIcon, CopyIcon, FindryIcon, GitHubIcon, PasswordIcon, RetryIcon, SwapIcon, TranslateIcon, VastNextIcon } from "./icons";
 
 const providers: Array<{ id: ProviderId; label: string; hint: string }> = [
   { id: "google", label: "Google", hint: "网页接口" },
@@ -340,9 +340,9 @@ export function TranslatorWorkbench() {
       <footer className="footer">
         <span>Vast Translator · 开源翻译工作台</span>
         <nav className="product-links" aria-label="VastNext 产品家族">
-          <a href="https://vastnext.com" target="_blank" rel="noreferrer">VastNext</a>
-          <a href="https://findryai.com" target="_blank" rel="noreferrer">Findry AI</a>
-          <a href="https://pg.vastnext.com" target="_blank" rel="noreferrer">Password Generator</a>
+          <a href="https://vastnext.com" target="_blank" rel="noreferrer"><VastNextIcon /><span>VastNext</span></a>
+          <a href="https://findryai.com" target="_blank" rel="noreferrer"><FindryIcon /><span>Findry AI</span></a>
+          <a href="https://pg.vastnext.com" target="_blank" rel="noreferrer"><PasswordIcon /><span>Password Generator</span></a>
         </nav>
       </footer>
     </div>
