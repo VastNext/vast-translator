@@ -28,9 +28,17 @@ interface ChatCompletion {
   }>;
 }
 
+// Agnes 应用层超时：部署模式必须注入 AGNES_TIMEOUT_MS（健康探针强制），
+// 未配置时回退 null 保持既有开发行为；生产镜像绝不静默无界等待。
+function resolveAgnesTimeout(envValue: string | undefined): number | null {
+  if (envValue === undefined || envValue.trim() === "") return null;
+  const parsed = Number(envValue);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 export class AgnesProvider implements TranslationProvider {
   readonly available: boolean;
-  readonly timeoutMs = null;
+  readonly timeoutMs: number | null;
 
   constructor(
     readonly id: AgnesProviderId,
@@ -38,8 +46,10 @@ export class AgnesProvider implements TranslationProvider {
     private readonly model: AgnesModel,
     private readonly fetcher: Fetcher = fetch,
     private readonly apiKey = process.env.AGNES_API_KEY,
+    timeoutMs: number | null = resolveAgnesTimeout(process.env.AGNES_TIMEOUT_MS),
   ) {
     this.available = Boolean(apiKey);
+    this.timeoutMs = timeoutMs;
   }
 
   async translate(input: ProviderInput, signal?: AbortSignal) {
