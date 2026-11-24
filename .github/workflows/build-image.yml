@@ -1,0 +1,119 @@
+name: Build Image
+
+# 只构建入口（VT-1 U4/M4）：候选镜像始终来自本 workflow，不为取镜像而推生产 tag。
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build (must resolve to one SHA used everywhere)
+        required: false
+        type: string
+    outputs:
+      digest:
+        description: Built image digest (sha256:...)
+        value: ${{ jobs.build.outputs.digest }}
+      release_id:
+        description: Release identifier (sha7-runid)
+        value: ${{ jobs.build.outputs.release_id }}
+      git_sha:
+        description: Resolved full commit SHA
+        value: ${{ jobs.build.outputs.git_sha }}
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build
+        required: false
+        default: main
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}-${{ inputs.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/vastnext/vast-translator
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      release_id: ${{ steps.meta.outputs.release_id }}
+      git_sha: ${{ steps.meta.outputs.git_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      # VT-1 M4：checkout 后 rev-parse 得唯一 SHA，贯穿标签/digest/请求/证据。
+      - name: Resolve SHA
+        id: meta
+        run: |
+          GIT_SHA="$(git rev-parse HEAD)"
+          RELEASE_ID="$(echo "$GIT_SHA" | cut -c1-7)-${{ github.run_id }}"
+          echo "git_sha=$GIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+          echo "Resolved SHA: $GIT_SHA release: $RELEASE_ID"
+
+      - name: Verify checks pass at this SHA
+        run: |
+          # 构建前在完全相同的 SHA 上重放四项检查（VT01 前置）。
+          node --version
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test:run
+          NEXT_OUTPUT_MODE=standalone npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare secret marker
+        run: |
+          MARKER="VT_FAKE_SECRET_MARKER-${{ github.run_id }}-$(date +%s)"
+          echo "SECRET_MARKER=$MARKER" >> "$GITHUB_ENV"
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:sha-${{ steps.meta.outputs.git_sha }}
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.release_id }}
+          secrets: |
+            test_marker=${{ env.SECRET_MARKER }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Pull built image
+        run: docker pull "$IMAGE@${{ steps.build.outputs.digest }}"
+
+      - name: Image audit (VT01)
+        env:
+          IMAGE_REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+        run: node scripts/deploy/image-check.mjs
+
+      - name: Summary
+        run: |
+          {
+            echo "### Image built"
+            echo ""
+            echo "- git_sha: ${{ steps.meta.outputs.git_sha }}"
+            echo "- release_id: ${{ steps.meta.outputs.release_id }}"
+            echo "- digest: ${{ steps.build.outputs.digest }}"
+          } >> "$GITHUB_STEP_SUMMARY"
