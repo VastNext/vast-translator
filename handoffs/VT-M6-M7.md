@@ -44,11 +44,11 @@ sudo bash -c "PLATFORM_ROOT=/opt/site-infra /usr/local/sbin/site-infra-release \
 
 | 项 | 说明 | 负责人 |
 | --- | --- | --- |
-| Agnes 启用 | 用户提供 AGNES_API_KEY → 追加两个 secrets env → TRANSLATE_ALLOWED_PROVIDERS 加 agnes-2-0,agnes-2-5 → 重启 active 容器 → 短句补验 | 用户 |
+| ~~Agnes 启用~~ | ✅ 已恢复（2026-11-24T20:05Z，用户供 key，agnes-2-5 实测成功；agnes-2-0 端点上游 429/5xx 为 apihub 容量条件，卡片可重试） | 已闭环 |
 | 仓库 Secrets | APPROVAL_HMAC/VPS_SSH_KEY/VPS_HOST/VPS_USER/VPS_KNOWN_HOSTS 尚未设入 vast-translator 仓库（文件在 G:/Caches/Temp/opencode/vt-keys/）；设置前 CI 发布工作流不可用 | 用户/后续会话 |
 | Vercel 项目暂停 | deploy.yml 已替换（自动化入口已消失）、Vercel Git 集成未连接（已核实）；CLI 无 pause 命令，建议用户在 dashboard 一键暂停作纵深防御 | 用户 |
 | zone SSL=full | vastnext.com zone 为 full（非 strict）；源站已有有效证书，可升级 strict，但影响全 zone 需用户确认 | 用户 |
-| 限流边界 | 每进程限流（10 并发/60/min）非供应商硬配额；费用上限需用户在 apihub/Azure 控制面另行设置 | 用户 |
+| 限流边界 | 每进程限流（10 并发/60/min）非供应商硬配额；Agnes 费用上限需用户在 apihub 控制面另行设置（agnes-2-0 已出现上游 429） | 用户 |
 | 24h 观察 | M7 观察（5xx/资源/备份恢复点）由用户日常巡检或后续会话接续 | 用户/后续会话 |
 
 ## 最终状态
