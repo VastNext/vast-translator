@@ -16,12 +16,16 @@
   "image_repo": "ghcr.io/vastnext/vast-translator",
   "image_visibility": "private",
   "node_version": "22.18.0",
-  "provider_enabled": ["google", "bing", "agnes-2-0", "agnes-2-5"],
-  "provider_disabled": ["azure"],
-  "provider_disabled_reason": "Vercel 项目 vast-translator 生产环境仅有 AGNES_API_KEY；AZURE_TRANSLATOR_KEY 未配置，Azure 卡片显示未配置错误，与现状一致。",
-  "secret_refs": {
-    "AGNES_API_KEY": "vercel env pull（fountainchan 账号，project=vast-translator，production）→ 安装到 VPS secrets/vast-translator.production.env 与 secrets/vast-translator.staging.env（0600）"
-  },
+  "provider_enabled": ["google", "bing"],
+  "provider_disabled": ["azure", "agnes-2-0", "agnes-2-5"],
+  "provider_disabled_reason": "Azure：Vercel 生产本就无 AZURE_TRANSLATOR_KEY。Agnes：AGNES_API_KEY 为 Vercel Sensitive 变量，CLI 无法解密（返回 [SENSITIVE VALUE HIDDEN]）；平台 secrets 中亦无（findryai.production.env 不含 AGNES_API_KEY）。按 C1『不跨项目搜密钥』的 BLOCKED 路径处理：先以 google,bing 上线，用户提供 key 后一行 secrets + allowed_providers 更新即恢复，不构成迁移阻塞。",
+  "blocked_followups": [
+    {
+      "item": "AGNES_API_KEY",
+      "action": "用户提供 key → 追加到 secrets/vast-translator.{staging,production}.env → TRANSLATE_ALLOWED_PROVIDERS 改为 google,bing,agnes-2-0,agnes-2-5 → 重启 active 容器 → VT15 补验 Agnes 短句",
+      "owner": "用户"
+    }
+  ],
   "production_policy": {
     "TRANSLATE_MAX_BODY_BYTES": 32768,
     "TRANSLATE_MAX_ACTIVE": 10,

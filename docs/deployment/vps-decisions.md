@@ -18,7 +18,7 @@
 
 1. **candidate_domain = `tr-preview.192-238-239-41.sslip.io`**。与 FindryAI staging 的 `192-238-239-41.sslip.io` 是不同 FQDN（不同 DNS 名称、不同证书、不同 localStorage origin），不违反 C1「不得复用 FindryAI sslip.io 域名」。候选入口以 Caddy basic_auth 凭证保护，匿名请求无法触达翻译 API。
 2. **home_marker = `Vast Translator`，home_path = `/text`**。已核对 `src/app/layout.tsx`：站点标题「Vast Translator｜多引擎文本翻译」出现在每页 HTML `<title>`；`/text` 与 `/` 均渲染 TranslatorWorkbench。固定之，M3 不再猜测。
-3. **provider 启用集合 = google, bing, agnes-2-0, agnes-2-5；azure 未启用**。Vercel 项目 `fountainchans-projects/vast-translator` 生产环境仅有 `AGNES_API_KEY`（95 天前创建，Sensitive）。Azure 缺 key 时卡片显示未配置错误，与现网行为一致。
+3. **provider 启用集合修订 = google, bing；azure 未启用；agnes 暂 BLOCKED**。Vercel 项目生产环境虽有 `AGNES_API_KEY` 变量，但它是 Sensitive 类型——`vercel env pull` 只返回 `[SENSITIVE VALUE HIDDEN]` 占位，无法取得真实值；平台 secrets（findryai.production.env）亦不含 AGNES_API_KEY（FindryAI 翻译走 GOOGLE_GENERATIVE_AI）。按 C1「不跨项目搜密钥」：不猜测、不借用，Agnes 按契约预期的 BLOCKED 路径延后。用户供给 key 后，向两个 secrets 文件追加一行并更新 `TRANSLATE_ALLOWED_PROVIDERS`，重启容器即恢复（M7 记录为 DEFERRED+负责人=用户）。Azure 缺 key 时卡片显示未配置错误，与现网行为一致。
 4. **生产政策 = lab_policy 同值**（body 32768B / max_active 10 / max_starts 60/min / Agnes 120s / request 125s）。Agnes 从无界等待改为 120s 有限上限，属研究文档第三节建议的「可配置上限」路径；Caddy `response_header_timeout=130s`（≥request+5s）、`drain_seconds=135`（≥request+10s）按 C3 派生。
 5. **Azure/Agnes 收费硬配额**：Agnes API key 为用户自有 apihub 账号；限流为每进程级别，非全局美元预算。VT15 真实短句验证按最小次数执行（每 provider 一次），并在 M7 记录「每进程限流 ≠ 供应商硬配额」的残留风险，由用户决定是否另立额度控制任务。
 6. **旧发布入口冻结方式**：本仓库 `deploy.yml` 现为 Vercel CLI 部署（main push + 手动）。M4 用 VPS 发布 workflow 替换该文件合入 main 后，旧 workflow 即不存在。另在切流后把 Vercel 项目暂停（`vercel project pause`，等价 FindryAI 处理），并在 P3 记录冻结证据。Vercel Git 集成是否存在以 `vercel projects inspect` 输出为准。
