@@ -1,0 +1,31 @@
+# 版本控制与本地环境（禁止进入构建上下文）
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.vercel
+.vscode
+.cursor
+.opencode
+.agents
+
+# 依赖与构建产物（镜像内重新安装/构建）
+node_modules
+.next
+out
+dist
+coverage
+*.tsbuildinfo
+
+# 测试、文档与临时文件
+tests
+docs
+handoffs
+evidence
+logs
+*.log
+*.md
+!README.md
+.cache
+tmp*

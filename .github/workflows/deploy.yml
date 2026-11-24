@@ -1,30 +1,320 @@
-name: Deploy to Vercel
+name: Deploy to VPS
 
+# VT-1 C5 两阶段发布：
+#   operation=prepare（默认，v* tag 触发）→ 构建镜像 + 受控候选部署 + 候选冒烟，到此为止。
+#   operation=promote（仅手动）→ 需要 root 已安装 acceptance/<site>/<release-id>.json，
+#     由服务器端 bin/release promote 强制校验；CI 无法自签验收记录。
+# 本仓库旧 Vercel 发布入口已随本文件替换而移除（P3 冻结）。
 on:
   push:
-    branches: [main]
+    tags:
+      - "v*"
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Ref to build and deploy (prepare only)
+        required: false
+        default: main
+      operation:
+        description: Release operation
+        required: true
+        type: choice
+        options: [prepare, promote]
+        default: prepare
+      release_id:
+        description: promote 时必填：已 prepare 的候选 release_id
+        required: false
+      git_sha:
+        description: promote 时必填：候选的完整提交 SHA
+        required: false
+      image_digest:
+        description: promote 时必填：候选镜像 digest（sha256:...）
+        required: false
+      site:
+        description: 目标站点（production 固定 vast-translator；候选手动走 SSH，不经本入口）
+        required: false
+        default: vast-translator
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
-  group: vercel-production
-  cancel-in-progress: true
+  group: vps-${{ inputs.site || 'vast-translator' }}-${{ inputs.operation || 'prepare' }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/vastnext/vast-translator
 
 jobs:
-  deploy:
+  prepare:
+    if: ${{ (github.event_name == 'push') || inputs.operation == 'prepare' }}
     runs-on: ubuntu-latest
-    env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    environment:
+      name: production
+      url: https://tr.vastnext.com
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      release_id: ${{ steps.meta.outputs.release_id }}
+      git_sha: ${{ steps.meta.outputs.git_sha }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx vercel@latest pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-      - run: npx vercel@latest build --prod --token=${{ secrets.VERCEL_TOKEN }}
-      - run: npx vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Resolve SHA
+        id: meta
+        run: |
+          GIT_SHA="$(git rev-parse HEAD)"
+          RELEASE_ID="$(echo "$GIT_SHA" | cut -c1-7)-${{ github.run_id }}"
+          echo "git_sha=$GIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Verify checks pass at this SHA
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test:run
+          NEXT_OUTPUT_MODE=standalone npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare secret marker
+        run: |
+          MARKER="VT_FAKE_SECRET_MARKER-${{ github.run_id }}-$(date +%s)"
+          echo "SECRET_MARKER=$MARKER" >> "$GITHUB_ENV"
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:sha-${{ steps.meta.outputs.git_sha }}
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.release_id }}
+          secrets: |
+            test_marker=${{ env.SECRET_MARKER }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Pull built image
+        run: docker pull "$IMAGE@${{ steps.build.outputs.digest }}"
+
+      - name: Image audit (VT01)
+        env:
+          IMAGE_REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+        run: node scripts/deploy/image-check.mjs
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<EOF
+          Host vps
+            HostName ${{ secrets.VPS_HOST }}
+            User ${{ secrets.VPS_USER || 'deploy' }}
+            IdentityFile ~/.ssh/id_ed25519
+            StrictHostKeyChecking yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Read current release state
+        id: state
+        run: |
+          SITE="${{ inputs.site || 'vast-translator' }}"
+          ssh vps "sudo -n /usr/local/sbin/site-infra-release status --site $SITE" > status.json
+          cat status.json
+          node -e '
+            const fs=require("fs");
+            const s=JSON.parse(fs.readFileSync("status.json","utf8"));
+            if (s.status!=="PASS") process.exit(1);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `generation=${s.generation ?? 0}\nconfig_hash=${s.config_hash}\nhost_id=${s.host_id}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `active_release=${s.active?.release_id??""}\n`);
+          '
+
+      - name: Generate prepare request and approval
+        env:
+          APPROVAL_HMAC: ${{ secrets.APPROVAL_HMAC }}
+          SITE: ${{ inputs.site || 'vast-translator' }}
+        run: |
+          node scripts/deploy/make-release.mjs \
+            --site "$SITE" \
+            --environment production \
+            --operation prepare \
+            --release-id "${{ steps.meta.outputs.release_id }}" \
+            --git-sha "${{ steps.meta.outputs.git_sha }}" \
+            --image-digest "${{ steps.build.outputs.digest }}" \
+            --config-hash "${{ steps.state.outputs.config_hash }}" \
+            --generation "${{ steps.state.outputs.generation }}" \
+            --host-id "${{ steps.state.outputs.host_id }}" \
+            --approver "${{ github.actor }}" \
+            --evidence-run-id "${{ github.run_id }}" \
+            --safety-reviewed "false" \
+            --out-dir .release
+
+      - name: Upload prepare files
+        env:
+          SITE: ${{ inputs.site || 'vast-translator' }}
+        run: |
+          ssh vps "sudo -n mkdir -p /etc/site-infra/requests /etc/site-infra/approvals && sudo -n chown root:deploy /etc/site-infra/requests /etc/site-infra/approvals"
+          scp .release/request-prepare.json "vps:/tmp/vt-prepare-${GITHUB_RUN_ID}.json"
+          scp .release/approval-prepare.json "vps:/tmp/vt-approve-${GITHUB_RUN_ID}.json"
+          ssh vps "sudo -n mv /tmp/vt-prepare-${GITHUB_RUN_ID}.json /etc/site-infra/requests/${SITE}-prepare-${GITHUB_RUN_ID}.json && sudo -n mv /tmp/vt-approve-${GITHUB_RUN_ID}.json /etc/site-infra/approvals/${SITE}-prepare-${GITHUB_RUN_ID}.json && sudo -n chown root:deploy /etc/site-infra/requests/${SITE}-prepare-${GITHUB_RUN_ID}.json /etc/site-infra/approvals/${SITE}-prepare-${GITHUB_RUN_ID}.json && sudo -n chmod 640 /etc/site-infra/requests/${SITE}-prepare-${GITHUB_RUN_ID}.json /etc/site-infra/approvals/${SITE}-prepare-${GITHUB_RUN_ID}.json"
+
+      - name: Prepare candidate
+        env:
+          SITE: ${{ inputs.site || 'vast-translator' }}
+        run: |
+          ssh vps "sudo -n /usr/local/sbin/site-infra-release prepare --request /etc/site-infra/requests/${SITE}-prepare-${GITHUB_RUN_ID}.json --approval /etc/site-infra/approvals/${SITE}-prepare-${GITHUB_RUN_ID}.json" | tee prepare.json
+          node -e 'const s=require("./prepare.json"); if(s.status!=="PASS") { console.error(JSON.stringify(s)); process.exit(1);}'
+
+      - name: Candidate smoke (loopback probe)
+        env:
+          SITE: ${{ inputs.site || 'vast-translator' }}
+        run: |
+          PROBE_PORT="$(node -e 'const s=require("./prepare.json"); process.stdout.write(String(s.extra?.probe_port ?? ""))')"
+          test -n "$PROBE_PORT"
+          ssh vps "curl --silent --max-time 30 http://127.0.0.1:${PROBE_PORT}/api/health" > candidate-health.json
+          ssh vps "curl --silent --max-time 30 'http://127.0.0.1:${PROBE_PORT}/api/health?deep=1'" > candidate-deep.json
+          node -e '
+            const fs=require("fs");
+            const h=JSON.parse(fs.readFileSync("candidate-health.json","utf8"));
+            const d=JSON.parse(fs.readFileSync("candidate-deep.json","utf8"));
+            if (h.status!=="ok" || h.service!=="vast-translator") { console.error(h); process.exit(1); }
+            if (d.status!=="ok") { console.error(d); process.exit(1); }
+            console.log("candidate healthy:", h.release, h.sha);
+          '
+
+      - name: Summary (candidate awaiting acceptance)
+        run: |
+          {
+            echo "### Candidate prepared (NOT promoted)"
+            echo ""
+            echo "- release_id: ${{ steps.meta.outputs.release_id }}"
+            echo "- git_sha: ${{ steps.meta.outputs.git_sha }}"
+            echo "- digest: ${{ steps.build.outputs.digest }}"
+            echo "- generation used: ${{ steps.state.outputs.generation }}"
+            echo ""
+            echo "**下一步（需人工/root）**：候选验证（VT15a 等）后由 root 安装"
+            echo "\`acceptance/vast-translator/${{ steps.meta.outputs.release_id }}.json\`，再运行 promote。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    if: ${{ inputs.operation == 'promote' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://tr.vastnext.com
+    steps:
+      - name: Require promote inputs
+        run: |
+          test -n "${{ inputs.release_id }}" || { echo "release_id required" >&2; exit 1; }
+          test -n "${{ inputs.git_sha }}" || { echo "git_sha required" >&2; exit 1; }
+          test -n "${{ inputs.image_digest }}" || { echo "image_digest required" >&2; exit 1; }
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<EOF
+          Host vps
+            HostName ${{ secrets.VPS_HOST }}
+            User ${{ secrets.VPS_USER || 'deploy' }}
+            IdentityFile ~/.ssh/id_ed25519
+            StrictHostKeyChecking yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Read current release state
+        id: state
+        run: |
+          SITE="${{ inputs.site || 'vast-translator' }}"
+          ssh vps "sudo -n /usr/local/sbin/site-infra-release status --site $SITE" > status.json
+          cat status.json
+          node -e '
+            const fs=require("fs");
+            const s=JSON.parse(fs.readFileSync("status.json","utf8"));
+            if (s.status!=="PASS") process.exit(1);
+            const cid = s.candidate?.release_id ?? "";
+            const want = process.env.WANT_RELEASE;
+            if (cid !== want) { console.error(`candidate ${cid} != requested ${want}`); process.exit(1); }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `generation=${s.generation ?? 0}\nconfig_hash=${s.config_hash}\nhost_id=${s.host_id}\n`);
+          '
+        env:
+          WANT_RELEASE: ${{ inputs.release_id }}
+
+      # acceptance 记录由 root 预先安装；promote 在服务器端强制校验（VT-1 C5）。
+      - name: Generate promote request and approval
+        env:
+          APPROVAL_HMAC: ${{ secrets.APPROVAL_HMAC }}
+          SITE: ${{ inputs.site || 'vast-translator' }}
+        run: |
+          node scripts/deploy/make-release.mjs \
+            --site "$SITE" \
+            --environment production \
+            --operation promote \
+            --release-id "${{ inputs.release_id }}" \
+            --git-sha "${{ inputs.git_sha }}" \
+            --image-digest "${{ inputs.image_digest }}" \
+            --config-hash "${{ steps.state.outputs.config_hash }}" \
+            --generation "${{ steps.state.outputs.generation }}" \
+            --host-id "${{ steps.state.outputs.host_id }}" \
+            --approver "${{ github.actor }}" \
+            --evidence-run-id "${{ github.run_id }}" \
+            --safety-reviewed "false" \
+            --out-dir .release
+
+      - name: Upload promote files
+        env:
+          SITE: ${{ inputs.site || 'vast-translator' }}
+        run: |
+          scp .release/request-promote.json "vps:/tmp/vt-promote-${GITHUB_RUN_ID}.json"
+          scp .release/approval-promote.json "vps:/tmp/vt-promote-appr-${GITHUB_RUN_ID}.json"
+          ssh vps "sudo -n mv /tmp/vt-promote-${GITHUB_RUN_ID}.json /etc/site-infra/requests/${SITE}-promote-${GITHUB_RUN_ID}.json && sudo -n mv /tmp/vt-promote-appr-${GITHUB_RUN_ID}.json /etc/site-infra/approvals/${SITE}-promote-${GITHUB_RUN_ID}.json && sudo -n chown root:deploy /etc/site-infra/requests/${SITE}-promote-${GITHUB_RUN_ID}.json /etc/site-infra/approvals/${SITE}-promote-${GITHUB_RUN_ID}.json && sudo -n chmod 640 /etc/site-infra/requests/${SITE}-promote-${GITHUB_RUN_ID}.json /etc/site-infra/approvals/${SITE}-promote-${GITHUB_RUN_ID}.json"
+
+      - name: Promote candidate
+        env:
+          SITE: ${{ inputs.site || 'vast-translator' }}
+        run: |
+          ssh vps "sudo -n /usr/local/sbin/site-infra-release promote --request /etc/site-infra/requests/${SITE}-promote-${GITHUB_RUN_ID}.json --approval /etc/site-infra/approvals/${SITE}-promote-${GITHUB_RUN_ID}.json" | tee promote.json
+          node -e 'const s=require("./promote.json"); if(s.status!=="PASS") { console.error(JSON.stringify(s)); process.exit(1);}'
+
+      - name: Production smoke
+        env:
+          SMOKE_BASE_URL: https://tr.vastnext.com
+          SMOKE_EXPECTED_RELEASE: ${{ inputs.release_id }}
+          SMOKE_EVIDENCE_DIR: evidence
+        run: node scripts/deploy/app-smoke.mjs
+
+      - name: Summary
+        run: |
+          {
+            echo "### Promoted to production"
+            echo ""
+            echo "- release_id: ${{ inputs.release_id }}"
+            echo "- digest: ${{ inputs.image_digest }}"
+          } >> "$GITHUB_STEP_SUMMARY"

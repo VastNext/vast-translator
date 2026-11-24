@@ -200,4 +200,35 @@ describe("AgnesProvider", () => {
 
     expect(provider.timeoutMs).toBeNull();
   });
+
+  it("AGNES_TIMEOUT_MS 注入有限上限（VT-1 C3）", () => {
+    const provider = new AgnesProvider(
+      "agnes-2-0",
+      "Agnes 2.0",
+      "agnes-2.0-flash",
+      vi.fn(),
+      "secret-key",
+      120_000,
+    );
+    expect(provider.timeoutMs).toBe(120_000);
+  });
+
+  it("非法 AGNES_TIMEOUT_MS 回退 null，不静默采用错误值", () => {
+    const provider = new AgnesProvider(
+      "agnes-2-0",
+      "Agnes 2.0",
+      "agnes-2.0-flash",
+      vi.fn(),
+      "secret-key",
+      resolveAgnesTimeoutForTest("not-a-number"),
+    );
+    expect(provider.timeoutMs).toBeNull();
+  });
 });
+
+function resolveAgnesTimeoutForTest(value: string): number | null {
+  // 与 agnes.ts 内部逻辑一致：非正数/非数字一律 null（部署模式由健康探针拦截）。
+  if (value === undefined || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}

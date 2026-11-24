@@ -1,0 +1,115 @@
+{
+  "$comment": "VT-1 M1 产物：全部 process.env 引用清单（无值）。phase: build=构建期可用 / runtime=仅运行期。生成自源码扫描 app_sha=747f8f7。",
+  "schema_version": 1,
+  "app": "vast-translator",
+  "variables": [
+    {
+      "name": "AGNES_API_KEY",
+      "source": "src/lib/translation/providers/agnes.ts",
+      "phase": "runtime",
+      "required_when": "TRANSLATE_ALLOWED_PROVIDERS 含 agnes-2-0 或 agnes-2-5",
+      "secret": true
+    },
+    {
+      "name": "AZURE_TRANSLATOR_KEY",
+      "source": "src/lib/translation/providers/azure.ts",
+      "phase": "runtime",
+      "required_when": "TRANSLATE_ALLOWED_PROVIDERS 含 azure",
+      "secret": true,
+      "note": "当前生产未启用 azure，key 不注入"
+    },
+    {
+      "name": "AZURE_TRANSLATOR_REGION",
+      "source": "src/lib/translation/providers/azure.ts",
+      "phase": "runtime",
+      "required_when": "TRANSLATE_ALLOWED_PROVIDERS 含 azure",
+      "secret": true
+    },
+    {
+      "name": "AZURE_TRANSLATOR_ENDPOINT",
+      "source": "src/lib/translation/providers/azure.ts",
+      "phase": "runtime",
+      "required_when": "可选（有默认 https://api.cognitive.microsofttranslator.com）",
+      "secret": false
+    },
+    {
+      "name": "TRANSLATE_ALLOWED_PROVIDERS",
+      "source": "src/app/api/health/route.ts + src/lib/translation/request-policy.ts",
+      "phase": "runtime",
+      "required_when": "部署模式（staging/production）必填",
+      "secret": false,
+      "example": "google,bing,agnes-2-0,agnes-2-5"
+    },
+    {
+      "name": "TRANSLATE_MAX_BODY_BYTES",
+      "source": "src/lib/translation/request-policy.ts",
+      "phase": "runtime",
+      "required_when": "部署模式必填",
+      "secret": false
+    },
+    {
+      "name": "TRANSLATE_MAX_ACTIVE",
+      "source": "src/lib/translation/request-policy.ts",
+      "phase": "runtime",
+      "required_when": "部署模式必填",
+      "secret": false
+    },
+    {
+      "name": "TRANSLATE_MAX_STARTS_PER_MINUTE",
+      "source": "src/lib/translation/request-policy.ts",
+      "phase": "runtime",
+      "required_when": "部署模式必填",
+      "secret": false
+    },
+    {
+      "name": "AGNES_TIMEOUT_MS",
+      "source": "src/lib/translation/providers/agnes.ts + request-policy.ts",
+      "phase": "runtime",
+      "required_when": "部署模式必填（Agnes 有限上限）",
+      "secret": false
+    },
+    {
+      "name": "TRANSLATE_REQUEST_TIMEOUT_MS",
+      "source": "src/lib/translation/request-policy.ts",
+      "phase": "runtime",
+      "required_when": "部署模式必填",
+      "secret": false
+    },
+    {
+      "name": "APP_RELEASE_ID",
+      "source": "src/app/api/health/route.ts",
+      "phase": "runtime",
+      "required_when": "部署模式必填（由平台 compose 注入）",
+      "secret": false
+    },
+    {
+      "name": "APP_GIT_SHA",
+      "source": "src/app/api/health/route.ts",
+      "phase": "runtime",
+      "required_when": "部署模式必填（由平台 compose 注入）",
+      "secret": false
+    },
+    {
+      "name": "APP_ENV",
+      "source": "src/app/api/health/route.ts",
+      "phase": "runtime",
+      "required_when": "由平台 compose 注入（staging/production）",
+      "secret": false
+    },
+    {
+      "name": "PORT",
+      "source": "Dockerfile / 平台 compose",
+      "phase": "runtime",
+      "required_when": "容器监听端口（默认 3000）",
+      "secret": false
+    },
+    {
+      "name": "NEXT_OUTPUT_MODE",
+      "source": "next.config.ts / Dockerfile",
+      "phase": "build",
+      "required_when": "Docker 构建固定 standalone",
+      "secret": false
+    }
+  ],
+  "next_public_frozen": []
+}
